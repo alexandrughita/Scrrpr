@@ -1,0 +1,8 @@
+{
+  "name": "Publi24 Advanced Scraper",
+  "description": "Scrapes listings from publi24.ro matrimoniale section with optional keyword filtering and county selection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
