@@ -11,6 +11,9 @@ import * as cheerio from "cheerio";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
 import https from "https";
+import { BursaV1Store } from "./src/bursa/store";
+import { BursaScraperService } from "./src/bursa/scraper";
+import { createBursaV1Router } from "./src/bursa/router";
 
 // Lazy initialization of Gemini client to comply with best practices
 let aiClient: GoogleGenAI | null = null;
@@ -4711,6 +4714,26 @@ async function startServer() {
     }
   });
 
+  // ------------------------------------------
+  // VERSIONED BURSA v1 OBSERVATION STORE, SCRAPER & APPROAPE API
+  // ------------------------------------------
+  const bursaV1Store = new BursaV1Store(PROFILES_DIR);
+  const bursaV1Scraper = new BursaScraperService({ store: bursaV1Store });
+
+  if (process.env.BURSA_SCHEDULER_ENABLED !== "false") {
+    const hasPriorRuns = bursaV1Store.getLatestRuns(1).length > 0;
+    const runOnBoot = process.env.BURSA_RUN_ON_STARTUP === "true" || !hasPriorRuns;
+    bursaV1Scraper.startScheduler(runOnBoot);
+  }
+
+  app.use(
+    "/api/v1/bursa",
+    createBursaV1Router({
+      store: bursaV1Store,
+      scraper: bursaV1Scraper,
+    })
+  );
+
   // ==========================================
   // LOCATION CHANGE DETECTION ENGINE & API
   // ==========================================
@@ -5264,6 +5287,7 @@ async function startServer() {
 
   const onShutdown = () => {
     console.log("[SERVER] Received shutdown signal, closing server...");
+    bursaV1Scraper.stopScheduler();
     server.close(() => {
       console.log("[SERVER] Server closed cleanly.");
       process.exit(0);
