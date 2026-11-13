@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, Phone, ExternalLink, Loader2, ChevronRight, ChevronLeft, Camera, Download, Copy, Check, RefreshCcw, Bookmark, BookmarkCheck, Database, Trash2, ArrowUpRight, Sparkles, Filter, ShieldCheck, AlertCircle, Clock, Calendar, Eye, FileText, ArrowLeft, PhoneCall } from 'lucide-react';
+import { 
+  Search, MapPin, Phone, ExternalLink, Loader2, ChevronRight, ChevronLeft, 
+  Camera, Download, Copy, Check, RefreshCcw, Bookmark, BookmarkCheck, Database, 
+  Trash2, ArrowUpRight, Sparkles, Filter, ShieldCheck, AlertCircle, Clock, 
+  Calendar, Eye, FileText, ArrowLeft, PhoneCall, Activity, Play, Pause, 
+  Terminal, CheckCircle2, Zap
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SavedProfilesView } from './SavedProfilesView';
+import { BursaCrawlerView } from './BursaCrawlerView';
 
 declare global {
   interface Window {
@@ -391,6 +398,101 @@ const CITIES_BY_COUNTY: Record<string, { id: string, name: string }[]> = {
 };
 
 /**
+ * Canonical 9-digit phone extractor (e.g. 7xxxxxxxx) for strict deduplication
+ */
+export function getNormalizedPhone(item: { revealedPhone?: string; phoneNumber?: string; link?: string }): string {
+  if (!item) return '';
+  let raw = item.revealedPhone || '';
+  if (!raw && item.phoneNumber && !item.phoneNumber.toLowerCase().includes('click') && !item.phoneNumber.toLowerCase().includes('reveal')) {
+    raw = item.phoneNumber;
+  }
+  if (!raw && item.link) {
+    const m = item.link.match(/\/(\d{10})\//);
+    if (m) raw = m[1];
+  }
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 9) {
+    return digits.slice(-9);
+  }
+  return '';
+}
+
+/**
+ * Filter out transexual, ts, trans, trasexuala, pentru femei / doamne, gay/lesbi
+ */
+export function isExcludedListing(item: { title?: string; description?: string; link?: string; location?: string; category?: string }): boolean {
+  if (!item) return false;
+  const rawText = `${item.title || ''} ${item.description || ''} ${item.link || ''} ${item.location || ''} ${item.category || ''}`.toLowerCase();
+  
+  // Normalize diacritics
+  const text = rawText
+    .replace(/ă/g, "a").replace(/â/g, "a").replace(/î/g, "i")
+    .replace(/ș/g, "s").replace(/ş/g, "s").replace(/ț/g, "t").replace(/ţ/g, "t");
+
+  // 1. Direct URL path checks
+  if (/\/gay-lesbi\//i.test(text) || /\/transex\w*\//i.test(text) || /\/ts\//i.test(text)) return true;
+
+  // 2. Direct category & badge text checks
+  if (text.includes("transexuale") || text.includes("gay-lesbi") || text.includes("travesti")) return true;
+
+  // 3. Regex patterns for trans / transexual / trasexuala / ts
+  const transPatterns = [
+    /\btrans\b/i,
+    /\btrans[_-]/i,
+    /\btransex\w*/i,
+    /\btranssex\w*/i,
+    /\btrasex\w*/i,
+    /\btranx\w*/i,
+    /\btransx\w*/i,
+    /\btravesti\w*/i,
+    /\bshe-?male\b/i,
+    /\blady-?boy\b/i,
+    /\bcrossdress\w*/i,
+    /\bfemboy\b/i,
+    /\bfemboi\b/i,
+    /\bgay-?lesbi\b/i,
+    /\bfata\s+trans\b/i,
+    /\btrans\s+(reala|draguta|superba|noua|activa|pasiva|versatila|sexy|fata|model|fem)\b/i,
+    /\bts\b/i,
+    /\bts\s+/i,
+    /\bts\d/i,
+    /\bts[_-]/i,
+    /\bbby\s+ts\b/i,
+    /\bmasaj\s+yoni\b/i
+  ];
+
+  for (const pat of transPatterns) {
+    if (pat.test(text)) return true;
+  }
+
+  // 4. Regex patterns for "pentru femei", "pt femei", "pt doamne", "pentru doamne", "domnisoare si doamne"
+  const pentruFemeiPatterns = [
+    /\b(pentru|pt\.?)\s+(femei|doamne|domnisoare)/i,
+    /\bdoamne\s+si\s+domnisoare\b/i,
+    /\bdomnisoare\s+si\s+doamne\b/i,
+    /\bdoamnelor\s+si\s+domnisoarelor\b/i,
+    /\bdomnisoarelor\s+si\s+doamnelor\b/i,
+    /\b(pentru|pt\.?)\s+.*?\bdoamne\b/i,
+    /\bdoamne\s+si\s+cupluri\b/i,
+    /\bcupluri\s+si\s+doamne\b/i,
+    /\b(domni|barbati)\s*,\s*doamne\b/i,
+    /\b(domni|barbati)\s+si\s+doamne\b/i,
+    /\b(dedicat|adresat)\s+(doamnelor|femeilor)/i,
+    /\bdoar\s+(pentru|pt\.?)\s+(doamne|femei)/i,
+    /\bmaseur\s+(domn|barbat)\b/i,
+    /\bbarbat\s+(pentru|pt\.?)\s+(doamne|femei)/i,
+    /\bdomn\s+(pentru|pt\.?)\s+(doamne|femei)/i,
+    /\bservicii\s+(pentru|pt\.?)\s+(doamne|femei)/i
+  ];
+
+  for (const pat of pentruFemeiPatterns) {
+    if (pat.test(text)) return true;
+  }
+
+  return false;
+}
+
+/**
  * Robust fetch with timeout and better error reporting
  */
 async function fetchWithTimeout(resource: string, options: any = {}) {
@@ -513,10 +615,112 @@ export default function App() {
   const [source, setSource] = useState<'publi24' | 'bursaplacerilor' | 'nimfomane' | 'inspector'>('publi24');
   const [pageSize, setPageSize] = useState<number>(100);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyingJsonId, setCopyingJsonId] = useState<string | number | null>(null);
+  const verifiedCopyDetailsRef = React.useRef<Map<string, any>>(new Map());
   const [excludeOras, setExcludeOras] = useState(false);
 
-  // View Navigation
-  const [activeTab, setActiveTab] = useState<'scraper' | 'saved'>('scraper');
+  // View Navigation: 'crawler' | 'scraper' | 'saved'
+  const [activeTab, setActiveTab] = useState<'scraper' | 'saved' | 'crawler'>(() => {
+    try {
+      const s = localStorage.getItem('publi24_active_tab');
+      if (s === 'crawler' || s === 'saved' || s === 'scraper') return s;
+    } catch {}
+    return 'crawler';
+  });
+
+  const handleSetActiveTab = (tab: 'scraper' | 'saved' | 'crawler') => {
+    setActiveTab(tab);
+    try {
+      localStorage.setItem('publi24_active_tab', tab);
+    } catch {}
+  };
+
+  // Crawler State & Actions in App
+  const [crawlerState, setCrawlerState] = useState<any>(null);
+  const [crawlerActionLoading, setCrawlerActionLoading] = useState<boolean>(false);
+
+  const fetchCrawlerStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/crawler/status");
+      if (res.ok) {
+        const data = await res.json();
+        setCrawlerState(data);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch crawler status", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCrawlerStatus();
+    const interval = setInterval(() => {
+      fetchCrawlerStatus();
+    }, crawlerState?.status === 'running' ? 2500 : 10000);
+    return () => clearInterval(interval);
+  }, [fetchCrawlerStatus, crawlerState?.status]);
+
+  const handleStartCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/start", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+      fetchSavedProfiles();
+    } catch (e) {
+      console.warn("Crawler start error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handlePauseCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/pause", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler pause error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handleResumeCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/resume", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler resume error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handleToggleCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/toggle", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler toggle error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handleClearCrawlerLogs = async () => {
+    try {
+      const res = await fetch("/api/crawler/clear-logs", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler clear logs error", e);
+    }
+  };
 
   // Saved Profiles Archive & Phone Search state
   const [savedProfiles, setSavedProfiles] = useState<SavedProfile[]>([]);
@@ -590,11 +794,33 @@ export default function App() {
 
   const copyToClipboard = async (text: string, id: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+        return;
+      }
     } catch (err) {
-      console.warn('Failed to copy:', err);
+      console.warn('navigator.clipboard failed, trying fallback:', err);
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.setAttribute('aria-hidden', 'true');
+      textarea.className = 'fixed -left-[9999px] top-0 opacity-0 pointer-events-none';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (ok) {
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+      }
+    } catch (fallbackErr) {
+      console.warn('Fallback copy failed:', fallbackErr);
     }
   };
 
@@ -657,16 +883,25 @@ export default function App() {
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        const profiles: SavedProfile[] = (data.profiles || []).map((p: any) => ({
+        const rawProfiles: SavedProfile[] = (data.profiles || []).map((p: any) => ({
           ...p,
           currentImageIndex: 0
         }));
-        setSavedProfiles(profiles);
-        if (typeof data.totalArchived === 'number') {
-          setSavedCount(data.totalArchived);
-        } else {
-          setSavedCount(profiles.length);
+        
+        // Strict exclusion and phone deduplication
+        const seenPhones = new Set<string>();
+        const profiles: SavedProfile[] = [];
+        for (const p of rawProfiles) {
+          if (isExcludedListing(p)) continue;
+          const cleanPhone = getNormalizedPhone(p);
+          if (cleanPhone && seenPhones.has(cleanPhone)) continue;
+          if (cleanPhone) seenPhones.add(cleanPhone);
+          profiles.push(p);
         }
+
+        setSavedProfiles(profiles);
+        setSavedCount(profiles.length);
+
         const links = new Set<string>();
         profiles.forEach(p => {
           if (p.link) links.add(normalizeLink(p.link));
@@ -937,7 +1172,8 @@ export default function App() {
         apiUrl = `/api/scrape?county=${county}&city=${encodeURIComponent(city.toLowerCase().replace(/\s+/g, '-'))}&page=${pageNum}&query=${encodeURIComponent(query)}&limit=${pageSize}`;
       } else if (source === 'bursaplacerilor') {
         setLoadingStatus(`Searching on Bursa Plăcerilor (${pageSize} results/page)...`);
-        apiUrl = `/api/scrape-bursaplacerilor?county=${county}&city=${encodeURIComponent(city)}&page=${pageNum}&query=${encodeURIComponent(query)}&limit=${pageSize}`;
+        const sectorParam = (county === 'bucuresti' || city.toLowerCase().includes('sector')) ? `&sector=${encodeURIComponent(city.toLowerCase().replace(/\s+/g, '-'))}` : '';
+        apiUrl = `/api/scrape-bursaplacerilor?county=${county}&city=${encodeURIComponent(city)}&page=${pageNum}&query=${encodeURIComponent(query)}&limit=${pageSize}${sectorParam}`;
       } else if (source === 'nimfomane') {
         setLoadingStatus('Searching on Nimfomane (this may take a moment)...');
         apiUrl = `/api/scrape-nimfomane?query=${encodeURIComponent(query)}&county=${county}&city=${city}&page=${pageNum}&limit=${pageSize}`;
@@ -980,29 +1216,48 @@ export default function App() {
         isDescriptionFetched: l.description && l.description.trim().length > 0 && !l.description.includes("Fără descriere")
       }));
       
-      // Calculate all links seen on ALL previous pages (1 .. pageNum - 1)
+      // Calculate all links and phones seen on ALL previous pages (1 .. pageNum - 1)
       const previousSeenLinks = new Set<string>();
+      const previousSeenPhones = new Set<string>();
       if (pageNum > 1) {
         Object.keys(pagesMap).forEach(pKey => {
           const pNum = parseInt(pKey, 10);
           if (pNum < pageNum && pagesMap[pNum]) {
             pagesMap[pNum].forEach(item => {
               if (item.link) previousSeenLinks.add(normalizeLink(item.link));
+              const phone = getNormalizedPhone(item);
+              if (phone) previousSeenPhones.add(phone);
             });
           }
         });
       }
 
-      // Strict Deduplication:
-      // 1. Must NOT match any link seen on previous pages
-      // 2. Must be unique within current page response
-      const uniqueListings = processedListings.filter((item: any, index: number, self: any[]) => {
-        if (!item.link) return false;
+      // Strict Deduplication & Exclusion:
+      // 1. Must NOT match any link or phone seen on previous pages
+      // 2. Must be unique by link and phone within current page response
+      // 3. Must not be an excluded category/profile (transexual, ts, trans, trasexuala, pentru femei / doamne)
+      const currentSeenLinks = new Set<string>();
+      const currentSeenPhones = new Set<string>();
+      const uniqueListings: any[] = [];
+
+      for (const item of processedListings) {
+        if (!item || !item.link) continue;
+        if (isExcludedListing(item)) continue;
+
         const norm = normalizeLink(item.link);
-        const isDuplicateFromPrev = previousSeenLinks.has(norm);
-        const isFirstInCurrent = index === self.findIndex((t) => normalizeLink(t.link) === norm);
-        return !isDuplicateFromPrev && isFirstInCurrent;
-      });
+        const normPhone = getNormalizedPhone(item);
+
+        if (previousSeenLinks.has(norm)) continue;
+        if (normPhone && previousSeenPhones.has(normPhone)) continue;
+
+        if (currentSeenLinks.has(norm)) continue;
+        if (normPhone && currentSeenPhones.has(normPhone)) continue;
+
+        currentSeenLinks.add(norm);
+        if (normPhone) currentSeenPhones.add(normPhone);
+
+        uniqueListings.push(item);
+      }
 
       setPagesMap(prev => ({
         ...prev,
@@ -1033,15 +1288,17 @@ export default function App() {
                 if (enr) {
                   return {
                     ...item,
+                    title: (enr.title && (!item.title || item.title.endsWith("...") || item.title.endsWith("…") || enr.title.length > item.title.length)) ? enr.title : item.title,
                     description: enr.desc || item.description,
                     images: enr.images && enr.images.length > 0 ? enr.images : item.images,
                     image: enr.images && enr.images.length > 0 ? enr.images[0] : item.image,
                     date: enr.date || item.date,
+                    location: enr.location || item.location,
                     isDescriptionFetched: !!enr.desc
                   };
                 }
                 return item;
-              }));
+              }).filter(item => !isExcludedListing(item)));
             }
           }).catch(() => {});
         }
@@ -1193,6 +1450,7 @@ export default function App() {
                 if (currentIdx !== -1) {
                   const enhancedListing = { 
                     ...newListings[currentIdx], 
+                    title: (data.title && data.title !== "Anunț" && !data.title.includes("Anunț expirat") && (!item.title || item.title === "Anunț" || data.title.length >= item.title.replace(/(\.\.\.|…)$/, "").trim().length)) ? data.title : item.title,
                     image: data.image || item.image,
                     images: images,
                     currentImageIndex: defaultIdx,
@@ -1434,9 +1692,81 @@ ${pageText.slice(0, 5000)}`;
     }
   };
 
-  const handleCopyJson = (item: Listing) => {
+  const handleCopyJson = async (item: Listing) => {
+    let enrichedItem: Listing = { ...item };
+
+    const currentTitle = (item.title || "").trim();
+    const currentDesc = (item.description || "").trim();
+    const applyDetailToItem = (detail: any) => {
+      const detailTitle = (detail.title || "").trim();
+      const detailDesc = (detail.description || "").trim();
+
+      const cleanBaseCurrentTitle = currentTitle.replace(/(\.\.\.|…)$/, "").trim();
+      if (
+        detailTitle &&
+        detailTitle !== "Anunț" &&
+        !detailTitle.includes("Anunț expirat") &&
+        (!currentTitle || currentTitle === "Anunț" || detailTitle.length >= cleanBaseCurrentTitle.length)
+      ) {
+        enrichedItem.title = detailTitle;
+      }
+
+      if (
+        detailDesc &&
+        !detailDesc.includes("No detailed description found") &&
+        !detailDesc.includes("Anunțul nu mai este activ") &&
+        (!currentDesc ||
+          currentDesc.endsWith("...") ||
+          currentDesc.endsWith("…") ||
+          currentDesc.includes("publicat pe BursaPlacerilor") ||
+          currentDesc.includes("No detailed description found") ||
+          detailDesc.length >= currentDesc.replace(/(\.\.\.|…)$/, "").length)
+      ) {
+        enrichedItem.description = detailDesc;
+      }
+
+      if (detail.images && Array.isArray(detail.images) && detail.images.length > (enrichedItem.images?.length || 0)) {
+        enrichedItem.images = detail.images;
+        if (!enrichedItem.image) enrichedItem.image = detail.image || detail.images[0];
+      }
+      if (detail.location && (!enrichedItem.location || enrichedItem.location === "România" || enrichedItem.location === "Locație nespecificată")) {
+        enrichedItem.location = detail.location;
+      }
+      if (detail.date && !enrichedItem.date) {
+        enrichedItem.date = detail.date;
+      }
+      if (detail.phone && (!enrichedItem.revealedPhone || enrichedItem.revealedPhone === "Not found")) {
+        enrichedItem.revealedPhone = String(detail.phone).replace(/\s+/g, '');
+      }
+      enrichedItem.isDescriptionFetched = true;
+    };
+
+    if (item.link) {
+      const cachedDetail = verifiedCopyDetailsRef.current.get(item.link);
+      if (cachedDetail) {
+        applyDetailToItem(cachedDetail);
+        setListings(prev => prev.map(l => (l.link === item.link ? { ...l, ...enrichedItem } : l)));
+      } else {
+        setCopyingJsonId(item.id);
+        try {
+          const res = await fetchWithTimeout(`/api/listing-detail?url=${encodeURIComponent(item.link)}`, { timeout: 20000 });
+          if (res.ok) {
+            const detail = await res.json();
+            verifiedCopyDetailsRef.current.set(item.link, detail);
+            applyDetailToItem(detail);
+            // Update card in current listings state so UI matches copied JSON
+            setListings(prev => prev.map(l => (l.link === item.link ? { ...l, ...enrichedItem } : l)));
+          }
+        } catch (err) {
+          console.warn("Failed to fetch full listing details before copying JSON:", err);
+        } finally {
+          setCopyingJsonId(null);
+        }
+      }
+    }
+
     // Deduplicate location just in case it's still doubled in state
-    let cleanLocation = item.location;
+    let cleanLocation = enrichedItem.location;
     if (cleanLocation) {
       // Check for glued repetition like "Timisoara, TimisTimisoara, Timis"
       const mid = Math.floor(cleanLocation.length / 2);
@@ -1470,11 +1800,11 @@ ${pageText.slice(0, 5000)}`;
       return u;
     };
 
-    const cleanMainImage = item.image ? normalizeImgUrl(item.image) : "";
+    const cleanMainImage = enrichedItem.image ? normalizeImgUrl(enrichedItem.image) : "";
     const uniqueImagesMap = new Map<string, string>();
     const allRawImages = [
-      ...(item.image ? [item.image] : []),
-      ...(item.images || [])
+      ...(enrichedItem.image ? [enrichedItem.image] : []),
+      ...(enrichedItem.images || [])
     ].filter(Boolean);
 
     allRawImages.forEach(img => {
@@ -1493,25 +1823,25 @@ ${pageText.slice(0, 5000)}`;
     };
 
     const dataToCopy = {
-      title: item.title,
+      title: enrichedItem.title,
+      description: enrichedItem.description || "",
       image: cleanMainImage,
       images: allImages,
       proxy_image: cleanMainImage ? getAbsoluteProxyUrl(cleanMainImage) : "",
       proxy_images: allImages.map(img => getAbsoluteProxyUrl(img)),
       location: cleanLocation,
-      description: item.description || "",
-      phone: (item.revealedPhone || item.phoneNumber || "").replace(/\s+/g, '') || null,
-      phoneImage: item.phoneImage || null,
-      source: item.source,
-      link: item.link,
-      author: item.author || item.title, // Use title as author if null
-      date: item.date || null,
+      phone: (enrichedItem.revealedPhone || enrichedItem.phoneNumber || "").replace(/\s+/g, '') || null,
+      phoneImage: enrichedItem.phoneImage || null,
+      source: enrichedItem.source,
+      link: enrichedItem.link,
+      author: enrichedItem.author || enrichedItem.title, // Use title as author if null
+      date: enrichedItem.date || null,
       extractedAt: new Date().toISOString()
     };
-    copyToClipboard(JSON.stringify(dataToCopy, null, 2), `json-${item.id}`);
+    await copyToClipboard(JSON.stringify(dataToCopy, null, 2), `json-${enrichedItem.id}`);
     
     // Auto-save to persistent archive whenever user copies JSON
-    handleSaveListing(item, 'Copied JSON & Saved to Archive!');
+    handleSaveListing(enrichedItem, 'Copied JSON & Saved to Archive!');
   };
 
   const handleShowPhone = async (listing: Listing, index: number) => {
@@ -1838,7 +2168,30 @@ If none found, return 'None'.`;
           {/* Mode Switcher Tabs */}
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <button
-              onClick={() => setActiveTab('scraper')}
+              onClick={() => handleSetActiveTab('crawler')}
+              className={`flex items-center gap-2.5 px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm tracking-wide transition-all cursor-pointer relative ${
+                activeTab === 'crawler'
+                  ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/30 scale-105 border-2 border-emerald-400'
+                  : 'bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/30'
+              }`}
+            >
+              <Activity className={`w-4 h-4 ${crawlerState?.status === 'running' ? 'animate-pulse' : ''}`} />
+              <span>WEEKLY AUTO-CRAWLER</span>
+              {crawlerState?.status === 'running' ? (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-black bg-black text-emerald-400 animate-pulse">
+                  PAG. {crawlerState?.currentPage || 1}
+                </span>
+              ) : (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                  activeTab === 'crawler' ? 'bg-black/30 text-black' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  7 ZILE
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => handleSetActiveTab('scraper')}
               className={`flex items-center gap-2.5 px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm tracking-wide transition-all cursor-pointer ${
                 activeTab === 'scraper'
                   ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/25 scale-105'
@@ -1851,7 +2204,7 @@ If none found, return 'None'.`;
 
             <button
               onClick={() => {
-                setActiveTab('saved');
+                handleSetActiveTab('saved');
                 fetchSavedProfiles();
               }}
               className={`flex items-center gap-2.5 px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm tracking-wide transition-all cursor-pointer relative ${
@@ -1861,11 +2214,11 @@ If none found, return 'None'.`;
               }`}
             >
               <Database className="w-4 h-4" />
-              <span>PHONE ARCHIVE & SAVED</span>
+              <span>BAZĂ DE DATE & SALVATE</span>
               <span className={`text-xs px-2.5 py-0.5 rounded-full font-black ${
                 activeTab === 'saved' ? 'bg-black/30 text-black' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
               }`}>
-                {savedCount}
+                {savedCount} / 5.000
               </span>
             </button>
           </div>
@@ -1873,7 +2226,26 @@ If none found, return 'None'.`;
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-12 -mt-16 relative z-30">
-        {activeTab === 'saved' ? (
+        {activeTab === 'crawler' ? (
+          <BursaCrawlerView
+            crawlerState={crawlerState}
+            crawlerActionLoading={crawlerActionLoading}
+            onStartCrawler={handleStartCrawler}
+            onPauseCrawler={handlePauseCrawler}
+            onResumeCrawler={handleResumeCrawler}
+            onToggleCrawler={handleToggleCrawler}
+            onClearLogs={handleClearCrawlerLogs}
+            onRefresh={() => {
+              fetchCrawlerStatus();
+              fetchSavedProfiles();
+            }}
+            onGoToDatabase={() => {
+              handleSetActiveTab('saved');
+              fetchSavedProfiles();
+            }}
+            savedCount={savedCount}
+          />
+        ) : activeTab === 'saved' ? (
           <SavedProfilesView
             savedProfiles={savedProfiles}
             savedCount={savedCount}
@@ -1906,6 +2278,45 @@ If none found, return 'None'.`;
           />
         ) : (
           <>
+            {/* Quick Auto-Crawler Status Pill Banner on Scraper View */}
+            <div className="mb-6 p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 backdrop-blur-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                  <Activity className={`w-4 h-4 ${crawlerState?.status === 'running' ? 'animate-pulse' : ''}`} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black text-white">Auto-Crawler Săptămânal Bursa:</span>
+                    {crawlerState?.status === 'running' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-400 text-black animate-pulse">
+                        Scanare în curs (Pag. {crawlerState?.currentPage || 1})
+                      </span>
+                    ) : crawlerState?.enabled ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Programat la 7 Zile
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-white/50">
+                        Dezactivat
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-white/50">
+                    Bază de date: <strong className="text-white">{savedCount}</strong> / 5.000 anunțuri • 1 telefon unic per profil • 0 trans/ts
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+                <button
+                  onClick={() => handleSetActiveTab('crawler')}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-xs transition-all cursor-pointer shadow-md shadow-emerald-500/20"
+                >
+                  Deschide Opțiuni Săptămânale
+                </button>
+              </div>
+            </div>
+
             {/* Controls */}
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 mb-12 shadow-2xl space-y-6">
               {/* Source Switcher & Results per page bar */}
@@ -2241,14 +2652,21 @@ If none found, return 'None'.`;
         {/* Results Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
           <AnimatePresence mode="popLayout">
-            {listings
-              .filter(item => {
-                // Strict keyword filtering removed to allow site search results
-                
-                if (!excludeOras) return true;
-                const searchStr = `${item.title} ${item.description || ''}`.toLowerCase();
-                return !searchStr.includes('oras') && !searchStr.includes('orasul') && !searchStr.includes('zile');
-              })
+            {(() => {
+              const seenRenderPhones = new Set<string>();
+              return listings
+                .filter(item => {
+                  if (isExcludedListing(item)) return false;
+                  if (excludeOras) {
+                    const searchStr = `${item.title} ${item.description || ''}`.toLowerCase();
+                    if (searchStr.includes('oras') || searchStr.includes('orasul') || searchStr.includes('zile')) return false;
+                  }
+                  const phone = getNormalizedPhone(item);
+                  if (phone && seenRenderPhones.has(phone)) return false;
+                  if (phone) seenRenderPhones.add(phone);
+                  return true;
+                });
+            })()
               .map((item, idx) => (
                 <motion.div
                   key={item.link ? `listing-${item.link}-${idx}` : `idx-${idx}`}
@@ -2453,13 +2871,13 @@ If none found, return 'None'.`;
                     )}
                   </div>
 
-                  {(item.description && item.description.trim().length > 0 && !item.description.includes("Fără descriere")) || item.isDescriptionFetched ? (
+                  {item.description && item.description.trim().length > 0 && !item.description.includes("Fără descriere") && !item.description.startsWith("Anunț publicat pe BursaPlacerilor.com") ? (
                     <div 
                       onClick={() => copyToClipboard(item.description || "", `desc-${idx}`)}
                       className="relative group/desc cursor-pointer"
                     >
                       <p className="text-white/40 text-xs line-clamp-3 font-light leading-relaxed italic pr-6">
-                        {item.description && item.description.trim().length > 0 ? item.description : "No description available."}
+                        {item.description}
                       </p>
                       <div className="absolute top-0 right-0 opacity-0 group-hover/desc:opacity-100 transition-opacity">
                         {copiedId === `desc-${idx}` ? (
@@ -2473,10 +2891,19 @@ If none found, return 'None'.`;
                     <button 
                       onClick={() => handleFetchDetails(item, idx)}
                       disabled={item.isRevealing}
-                      className="text-[10px] uppercase tracking-widest text-emerald-400/60 hover:text-emerald-400 flex items-center gap-1 transition-colors disabled:opacity-50"
+                      className="text-[10px] uppercase tracking-widest text-emerald-400/80 hover:text-emerald-300 flex items-center gap-1.5 transition-colors disabled:opacity-50 font-medium py-1"
                     >
-                      <Search className="w-3 h-3" />
-                      {item.isRevealing ? 'Fetching Description...' : 'Fetch Description'}
+                      {item.isRevealing ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                          <span>Se încarcă descrierea completă...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-3 h-3" />
+                          <span>Încarcă descrierea completă</span>
+                        </>
+                      )}
                     </button>
                   )}
                   
@@ -2548,14 +2975,20 @@ If none found, return 'None'.`;
                     {/* Copy JSON Button */}
                     <button 
                       onClick={(e) => { e.stopPropagation(); handleCopyJson(item); }}
-                      title="Copy Listing Info as JSON and Save to Archive"
-                      className={`w-full text-[10px] uppercase tracking-widest py-3 rounded-2xl border transition-all flex items-center justify-center gap-2 font-bold cursor-pointer ${
+                      disabled={copyingJsonId === item.id}
+                      title="Copy Listing Info as JSON (with full title & description) and Save to Archive"
+                      className={`w-full text-[10px] uppercase tracking-widest py-3 rounded-2xl border transition-all flex items-center justify-center gap-2 font-bold cursor-pointer disabled:opacity-60 ${
                         copiedId === `json-${item.id}`
                           ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-sm'
                           : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white border-white/10'
                       }`}
                     >
-                      {copiedId === `json-${item.id}` ? (
+                      {copyingJsonId === item.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                          <span className="text-emerald-400">FETCHING FULL DETAILS...</span>
+                        </>
+                      ) : copiedId === `json-${item.id}` ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
                           <span>COPIED & SAVED TO ARCHIVE</span>

@@ -3,10 +3,11 @@ import {
   Phone, Search, RefreshCcw, ExternalLink, Trash2, Download, 
   Copy, Check, MapPin, Calendar, Clock, ChevronRight, ChevronLeft, 
   FileText, ShieldCheck, AlertCircle, Sparkles, PhoneCall, ArrowUpRight,
-  Database, Tag, Navigation, Code2, Terminal, ArrowRight, CheckCircle2, XCircle, Compass
+  Database, Tag, Navigation, Code2, Terminal, ArrowRight, CheckCircle2, XCircle, Compass,
+  Play, Pause, ChevronDown, ChevronUp, Activity, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SavedProfile } from './App';
+import { SavedProfile, isExcludedListing, getNormalizedPhone } from './App';
 
 interface SavedProfilesViewProps {
   savedProfiles: SavedProfile[];
@@ -58,15 +59,143 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
   onDownloadImage,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyingJsonId, setCopyingJsonId] = useState<string | null>(null);
+  const verifiedDetailsRef = React.useRef<Map<string, any>>(new Map());
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>('');
   const [expandedDescId, setExpandedDescId] = useState<string | null>(null);
   const [showLocationChecker, setShowLocationChecker] = useState<boolean>(false);
+  const [showCrawlerPanel, setShowCrawlerPanel] = useState<boolean>(true);
+  const [crawlerState, setCrawlerState] = useState<any>(null);
+  const [crawlerActionLoading, setCrawlerActionLoading] = useState<boolean>(false);
+  const [showCrawlerLogs, setShowCrawlerLogs] = useState<boolean>(false);
+
+  const fetchCrawlerStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/crawler/status");
+      if (res.ok) {
+        const data = await res.json();
+        setCrawlerState(data);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch crawler status", e);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchCrawlerStatus();
+    const interval = setInterval(() => {
+      fetchCrawlerStatus();
+    }, (crawlerState?.status === 'running' || crawlerState?.isEnriching) ? 3000 : 15000);
+    return () => clearInterval(interval);
+  }, [fetchCrawlerStatus, crawlerState?.status, crawlerState?.isEnriching]);
+
+  const handleStartCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/start", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+      onRefresh();
+    } catch (e) {
+      console.warn("Crawler start error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handlePauseCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/pause", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler pause error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handleResumeCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/resume", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler resume error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handleToggleCrawler = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/toggle", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler toggle error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    try {
+      const res = await fetch("/api/crawler/clear-logs", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+    } catch (e) {
+      console.warn("Crawler clear logs error", e);
+    }
+  };
+
+  const handleEnrichDescriptions = async () => {
+    setCrawlerActionLoading(true);
+    try {
+      const res = await fetch("/api/crawler/enrich-descriptions", { method: "POST" });
+      const data = await res.json();
+      if (data.state) setCrawlerState(data.state);
+      onRefresh();
+    } catch (e) {
+      console.warn("Crawler enrich error", e);
+    } finally {
+      setCrawlerActionLoading(false);
+    }
+  };
+
+  const formatCountdown = (targetTs?: number) => {
+    if (!targetTs) return 'Nespecificat';
+    const diff = targetTs - Date.now();
+    if (diff <= 0) return 'Scanează în curând...';
+    const days = Math.floor(diff / (24 * 3600 * 1000));
+    const hours = Math.floor((diff % (24 * 3600 * 1000)) / (3600 * 1000));
+    const mins = Math.floor((diff % (3600 * 1000)) / (60 * 1000));
+    if (days > 0) return `${days}z ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    return `${mins}m`;
+  };
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 100;
-  const totalPages = Math.ceil(savedProfiles.length / pageSize) || 1;
+
+  // Deduplicate by phone and filter out any excluded listings
+  const cleanSavedProfiles = React.useMemo(() => {
+    const seenPhones = new Set<string>();
+    return savedProfiles.filter(p => {
+      if (isExcludedListing(p)) return false;
+      const phone = getNormalizedPhone(p);
+      if (phone && seenPhones.has(phone)) return false;
+      if (phone) seenPhones.add(phone);
+      return true;
+    });
+  }, [savedProfiles]);
+
+  const totalPages = Math.ceil(cleanSavedProfiles.length / pageSize) || 1;
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedProfiles = savedProfiles.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const paginatedProfiles = cleanSavedProfiles.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   React.useEffect(() => {
     setCurrentPage(1);
@@ -156,25 +285,131 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
 
   const copyToClipboard = async (text: string, id: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+        return;
+      }
     } catch (e) {
-      console.warn("Copy failed:", e);
+      console.warn("navigator.clipboard failed, trying fallback:", e);
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.setAttribute('aria-hidden', 'true');
+      textarea.className = 'fixed -left-[9999px] top-0 opacity-0 pointer-events-none';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (ok) {
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+      }
+    } catch (fallbackErr) {
+      console.warn("Fallback copy failed:", fallbackErr);
     }
   };
 
-  const handleCopySavedJson = (p: SavedProfile) => {
+  const handleCopySavedJson = async (p: SavedProfile) => {
+    let fullTitle = (p.title || "").trim();
+    let fullDescription = (p.description || "").trim();
+    let fullImages = p.images || (p.image ? [p.image] : []);
+    let fullImage = p.image;
+    let fullLocation = p.location;
+    let fullPrice = p.price;
+    let fullDate = p.date;
+    let fullPhone = (p.revealedPhone || p.phoneNumber || "").replace(/\s+/g, '') || null;
+
+    const applyDetail = (detail: any): boolean => {
+      let improved = false;
+      const detailTitle = (detail.title || "").trim();
+      const detailDesc = (detail.description || "").trim();
+
+      const cleanBaseTitle = fullTitle.replace(/(\.\.\.|…)$/, "").trim();
+      if (
+        detailTitle &&
+        detailTitle !== "Anunț" &&
+        !detailTitle.includes("Anunț expirat") &&
+        (fullTitle === "" || fullTitle === "Anunț" || detailTitle.length >= cleanBaseTitle.length)
+      ) {
+        if (detailTitle !== fullTitle) improved = true;
+        fullTitle = detailTitle;
+      }
+
+      if (
+        detailDesc &&
+        !detailDesc.includes("No detailed description found") &&
+        !detailDesc.includes("Anunțul nu mai este activ") &&
+        (fullDescription === "" ||
+          fullDescription.endsWith("...") ||
+          fullDescription.endsWith("…") ||
+          fullDescription.includes("publicat pe BursaPlacerilor") ||
+          fullDescription.includes("No detailed description found") ||
+          detailDesc.length >= fullDescription.replace(/(\.\.\.|…)$/, "").length)
+      ) {
+        if (detailDesc !== fullDescription) improved = true;
+        fullDescription = detailDesc;
+      }
+
+      if (detail.images && detail.images.length > fullImages.length) {
+        fullImages = detail.images;
+        fullImage = detail.image || detail.images[0] || fullImage;
+      }
+      if (detail.location && (!fullLocation || fullLocation === "România" || fullLocation === "Locație nespecificată")) {
+        fullLocation = detail.location;
+      }
+      if (detail.price && !fullPrice) {
+        fullPrice = detail.price;
+      }
+      if (detail.date && !fullDate) {
+        fullDate = detail.date;
+      }
+      if (detail.phone && !fullPhone) {
+        fullPhone = String(detail.phone).replace(/\s+/g, '') || null;
+      }
+
+      return improved;
+    };
+
+    if (p.link) {
+      const cachedDetail = verifiedDetailsRef.current.get(p.link);
+      if (cachedDetail) {
+        applyDetail(cachedDetail);
+      } else {
+        setCopyingJsonId(p.id);
+        try {
+          const res = await fetch(`/api/listing-detail?url=${encodeURIComponent(p.link)}`);
+          if (res.ok) {
+            const detail = await res.json();
+            verifiedDetailsRef.current.set(p.link, detail);
+            const improved = applyDetail(detail);
+            if (improved) {
+              onRefresh();
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to fetch full details before copying saved JSON:", err);
+        } finally {
+          setCopyingJsonId(null);
+        }
+      }
+    }
+
     const dataToCopy = {
       id: p.id,
-      title: p.title,
-      image: p.image,
-      images: p.images || [],
-      location: p.location,
-      price: p.price,
-      date: p.date,
-      description: p.description,
-      phone: (p.revealedPhone || p.phoneNumber || "").replace(/\s+/g, '') || null,
+      title: fullTitle,
+      description: fullDescription,
+      image: fullImage,
+      images: fullImages,
+      location: fullLocation,
+      price: fullPrice,
+      date: fullDate,
+      phone: fullPhone,
       phoneImage: p.phoneImage || null,
       source: p.source,
       link: p.link,
@@ -185,7 +420,7 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
       notes: p.notes || null,
       changeHistory: p.changeHistory || []
     };
-    copyToClipboard(JSON.stringify(dataToCopy, null, 2), `saved-json-${p.id}`);
+    await copyToClipboard(JSON.stringify(dataToCopy, null, 2), `saved-json-${p.id}`);
   };
 
   const formatTimestamp = (ts?: number) => {
@@ -228,6 +463,26 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 self-stretch md:self-auto justify-end">
+            <button
+              onClick={() => setShowCrawlerPanel(!showCrawlerPanel)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
+                showCrawlerPanel 
+                  ? 'bg-emerald-500 text-black border-emerald-400 font-black shadow-lg shadow-emerald-500/30' 
+                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+              }`}
+            >
+              <Activity className={`w-3.5 h-3.5 ${crawlerState?.status === 'running' ? 'animate-pulse' : ''}`} />
+              <span>Auto-Crawler Bursa</span>
+              {crawlerState?.status === 'running' ? (
+                <span className="px-1.5 py-0.5 rounded text-[9px] bg-black text-emerald-400 uppercase font-mono font-bold animate-pulse">
+                  Scanare Activă
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-400/20 text-emerald-300 uppercase font-mono font-bold">
+                  7 Zile
+                </span>
+              )}
+            </button>
             <button
               onClick={() => setShowLocationChecker(!showLocationChecker)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
@@ -643,6 +898,304 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
         )}
       </div>
 
+      {/* Bursa Plăcerilor Weekly Auto-Crawler Dashboard */}
+      {showCrawlerPanel && (
+        <div className="relative overflow-hidden bg-gradient-to-r from-emerald-950/60 via-[#101413] to-slate-950/70 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl animate-fadeIn">
+          {/* Header Row */}
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-6 border-b border-emerald-500/20">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="p-3 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-lg shadow-emerald-500/10">
+                <Activity className={`w-6 h-6 ${crawlerState?.status === 'running' ? 'animate-pulse text-emerald-300' : ''}`} />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                    Auto-Crawler Săptămânal Bursa Plăcerilor
+                  </h3>
+                  {/* Status Badge */}
+                  {crawlerState?.status === 'running' ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500 text-black shadow-lg shadow-emerald-500/30 animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-black"></span>
+                      Scanare în Curs (Pag. {crawlerState.currentPage || 1}/{crawlerState.maxPages || 400})
+                    </span>
+                  ) : crawlerState?.status === 'paused' ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      <Pause className="w-3 h-3" />
+                      În Pauză
+                    </span>
+                  ) : crawlerState?.enabled ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <Clock className="w-3 h-3" />
+                      Programat la 7 Zile
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/10 text-white/50 border border-white/10">
+                      Dezactivat
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/60 text-xs sm:text-sm mt-1 max-w-2xl">
+                  Actualizare automată la fiecare 7 zile • 1 număr de telefon per profil • 0 trans / ts • Până la 5.000 anunțuri • Spațiere anti-blocare (2.5s - 4.0s).
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Actions Bar */}
+            <div className="flex flex-wrap items-center gap-2.5 self-stretch lg:self-auto justify-end">
+              {/* Start / Pause / Resume Controls */}
+              {crawlerState?.status === 'running' ? (
+                <button
+                  onClick={handlePauseCrawler}
+                  disabled={crawlerActionLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all cursor-pointer shadow-lg disabled:opacity-50"
+                >
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Pauză Scanare</span>
+                </button>
+              ) : crawlerState?.status === 'paused' ? (
+                <button
+                  onClick={handleResumeCrawler}
+                  disabled={crawlerActionLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black transition-all cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Reia Scanarea</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleStartCrawler}
+                  disabled={crawlerActionLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black transition-all cursor-pointer shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Scanează Acum</span>
+                </button>
+              )}
+
+              {/* Weekly Auto-Schedule Toggle */}
+              <button
+                onClick={handleToggleCrawler}
+                disabled={crawlerActionLoading}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer border ${
+                  crawlerState?.enabled 
+                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20' 
+                    : 'bg-white/5 text-white/50 border-white/10 hover:bg-white/10'
+                }`}
+                title="Activează/Dezactivează scanarea automată la fiecare 7 zile"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Auto-Scan (7 Zile):</span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                  crawlerState?.enabled ? 'bg-emerald-400 text-black' : 'bg-white/20 text-white/70'
+                }`}>
+                  {crawlerState?.enabled ? 'ACTIVAT' : 'OPRIT'}
+                </span>
+              </button>
+
+              {/* Enrich Real Descriptions Button */}
+              {(crawlerState?.missingDescriptionsCount > 0 || crawlerState?.isEnriching) && (
+                <button
+                  onClick={handleEnrichDescriptions}
+                  disabled={crawlerActionLoading || crawlerState?.isEnriching}
+                  className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-xs font-bold transition-all cursor-pointer disabled:opacity-60"
+                  title="Extrage descrierile reale complete de pe Bursa Plăcerilor"
+                >
+                  <FileText className={`w-3.5 h-3.5 ${crawlerState?.isEnriching ? 'animate-pulse' : ''}`} />
+                  <span>
+                    {crawlerState?.isEnriching
+                      ? `Extrag descrierile (${crawlerState?.missingDescriptionsCount || 0} rămase)...`
+                      : `Extrage Descrieri Reale (${crawlerState?.missingDescriptionsCount})`}
+                  </span>
+                </button>
+              )}
+
+              {/* View Logs Toggle */}
+              <button
+                onClick={() => setShowCrawlerLogs(!showCrawlerLogs)}
+                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border text-xs font-bold transition-all cursor-pointer ${
+                  showCrawlerLogs 
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                    : 'bg-white/5 hover:bg-white/10 text-white/70 border-white/10'
+                }`}
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Jurnal ({crawlerState?.logs?.length || 0})</span>
+                {showCrawlerLogs ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Database Capacity & Schedule Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-6">
+            {/* 5,000 Capacity Meter */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-black/40 border border-emerald-500/20 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-white/60 uppercase tracking-wider flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  Capacitate Bază de Date
+                </span>
+                <span className="text-xs font-mono font-bold text-emerald-400">
+                  {crawlerState?.databaseCapacity?.percent || 0}%
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2 mb-2">
+                <span className="text-2xl sm:text-3xl font-black text-white font-mono">
+                  {(crawlerState?.databaseCapacity?.current || cleanSavedProfiles.length).toLocaleString()}
+                </span>
+                <span className="text-xs font-bold text-white/40">
+                  / {((crawlerState?.databaseCapacity?.max || 5000)).toLocaleString()} anunțuri max
+                </span>
+              </div>
+              <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-emerald-500 to-cyan-400 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, crawlerState?.databaseCapacity?.percent || (cleanSavedProfiles.length / 5000) * 100)}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-white/40 mt-2">
+                Limita de 5.000 de anunțuri unice păstrează cele mai proaspete profiluri și elimină automat cele mai vechi.
+              </p>
+            </div>
+
+            {/* Next Scheduled Crawl / Timing */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-black/40 border border-emerald-500/20 flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-bold text-white/60 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                  Program Săptămânal (7 Zile)
+                </span>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/50">Următoarea scanare:</span>
+                    <span className="font-mono font-bold text-white">
+                      {crawlerState?.status === 'running' 
+                        ? 'În execuție acum' 
+                        : crawlerState?.nextRunScheduled 
+                          ? `${new Date(crawlerState.nextRunScheduled).toLocaleDateString('ro-RO')} (${formatCountdown(crawlerState.nextRunScheduled)})` 
+                          : 'În curând'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/50">Ultima finalizare:</span>
+                    <span className="font-mono text-white/80">
+                      {crawlerState?.lastRunFinished 
+                        ? new Date(crawlerState.lastRunFinished).toLocaleDateString('ro-RO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) 
+                        : 'Prima scanare'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/50">Frecvență scanare:</span>
+                    <span className="font-mono font-bold text-emerald-400">La fiecare 7 zile</span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-white/40 mt-2">
+                Verifică automat noile anunțuri și actualizează telefoanele existente.
+              </p>
+            </div>
+
+            {/* Anti-Block & Compliance Specs */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-black/40 border border-emerald-500/20 flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-bold text-white/60 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  Reguli Active de Scanare
+                </span>
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center gap-2 text-white/80">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span><strong>1 Telefon per Profil:</strong> Zero duplicate</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-white/80">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span><strong>Filtru Strict:</strong> 0 trans, ts, trasexuale, femei</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-white/80">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span><strong>Anti-Block:</strong> 2.5s - 4.0s pauză între cereri</span>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-white/40 mt-2">
+                Protejat împotriva limitării de rată și compatibil cu protecția Bursa Plăcerilor.
+              </p>
+            </div>
+          </div>
+
+          {/* Running Progress Card */}
+          {crawlerState?.status === 'running' && (
+            <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 animate-pulse">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <RefreshCcw className="w-4 h-4 text-emerald-400 animate-spin" />
+                  <span className="text-xs font-bold text-emerald-300">
+                    {crawlerState?.currentStatusMessage || 'Scanare în desfășurare...'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs font-mono">
+                  <span className="text-emerald-400">+{crawlerState?.stats?.adsAdded || 0} noi</span>
+                  <span className="text-cyan-400">{crawlerState?.stats?.adsUpdated || 0} actualizate</span>
+                  <span className="text-amber-400">{crawlerState?.stats?.adsExcluded || 0} excluse</span>
+                </div>
+              </div>
+              <div className="w-full bg-black/60 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className="bg-emerald-400 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${Math.min(100, ((crawlerState?.currentPage || 1) / (crawlerState?.maxPages || 400)) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Terminal Activity Logs Viewer */}
+          {showCrawlerLogs && (
+            <div className="mt-4 pt-4 border-t border-emerald-500/20 animate-fadeIn">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-xs font-mono text-emerald-400">
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span>Jurnal de Rulare & Scanare Bursa Plăcerilor:</span>
+                </div>
+                <button
+                  onClick={handleClearLogs}
+                  className="text-[11px] text-white/50 hover:text-white underline cursor-pointer"
+                >
+                  Curăță Jurnalul
+                </button>
+              </div>
+              <div className="bg-black/80 border border-white/10 rounded-2xl p-3.5 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-white/20">
+                {crawlerState?.logs && crawlerState.logs.length > 0 ? (
+                  crawlerState.logs.map((log: any, idx: number) => (
+                    <div key={idx} className="flex items-start gap-2 leading-relaxed">
+                      <span className="text-white/40 shrink-0">
+                        [{new Date(log.timestamp).toLocaleTimeString('ro-RO')}]
+                      </span>
+                      <span className={`shrink-0 uppercase font-bold text-[10px] px-1 py-0.2 rounded ${
+                        log.type === 'error' ? 'bg-red-500/20 text-red-400' :
+                        log.type === 'warn' ? 'bg-amber-500/20 text-amber-400' :
+                        log.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' :
+                        'bg-white/10 text-cyan-300'
+                      }`}>
+                        {log.type}
+                      </span>
+                      <span className={`break-words ${
+                        log.type === 'error' ? 'text-red-300' :
+                        log.type === 'warn' ? 'text-amber-200' :
+                        log.type === 'success' ? 'text-emerald-200' :
+                        'text-white/80'
+                      }`}>
+                        {log.message}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-white/40 text-center py-4">Nu există înregistrări în jurnal.</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Loading state */}
       {loadingSaved && (
         <div className="py-20 text-center flex flex-col items-center justify-center gap-3">
@@ -1002,12 +1555,12 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
                     </div>
 
                     {/* Description preview */}
-                    {profile.description && (
-                      <div className="text-xs text-white/60 leading-relaxed">
-                        <p className={expandedDescId === profile.id ? '' : 'line-clamp-2'}>
+                    {profile.description && !profile.description.includes('publicat pe BursaPlacerilor') ? (
+                      <div className="text-xs text-white/75 leading-relaxed">
+                        <p className={expandedDescId === profile.id ? '' : 'line-clamp-3'}>
                           {profile.description}
                         </p>
-                        {profile.description.length > 90 && (
+                        {profile.description.length > 110 && (
                           <button
                             onClick={() => setExpandedDescId(expandedDescId === profile.id ? null : profile.id)}
                             className="text-[10px] text-emerald-400/80 hover:text-emerald-300 font-semibold mt-1 cursor-pointer"
@@ -1016,7 +1569,18 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
                           </button>
                         )}
                       </div>
-                    )}
+                    ) : profile.description ? (
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-amber-300/80 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1.5">
+                        <span>Se extrage descrierea reală în fundal...</span>
+                        <button
+                          onClick={() => onUpdateProfile(profile)}
+                          disabled={isUpdating}
+                          className="text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer shrink-0 disabled:opacity-50"
+                        >
+                          {isUpdating ? 'Se încarcă...' : 'Extrage acum'}
+                        </button>
+                      </div>
+                    ) : null}
 
                     {/* Notes field */}
                     <div className="pt-2 border-t border-white/5">
@@ -1065,10 +1629,16 @@ export const SavedProfilesView: React.FC<SavedProfilesViewProps> = ({
                     {/* Copy JSON Button */}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCopySavedJson(profile); }}
-                      title="Copy Archived Profile as JSON"
-                      className="w-full mt-3 text-[10px] uppercase tracking-widest py-2.5 rounded-xl border bg-white/5 hover:bg-white/10 text-white/50 hover:text-white border-white/10 transition-all flex items-center justify-center gap-1.5 font-bold cursor-pointer"
+                      disabled={copyingJsonId === profile.id}
+                      title="Copy Archived Profile as JSON (with full title & description)"
+                      className="w-full mt-3 text-[10px] uppercase tracking-widest py-2.5 rounded-xl border bg-white/5 hover:bg-white/10 text-white/50 hover:text-white border-white/10 transition-all flex items-center justify-center gap-1.5 font-bold cursor-pointer disabled:opacity-60"
                     >
-                      {copiedId === `saved-json-${profile.id}` ? (
+                      {copyingJsonId === profile.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                          <span className="text-emerald-400">FETCHING FULL DETAILS...</span>
+                        </>
+                      ) : copiedId === `saved-json-${profile.id}` ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
                           <span className="text-emerald-400">COPIED ARCHIVE JSON</span>

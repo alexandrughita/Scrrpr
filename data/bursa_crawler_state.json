@@ -1,0 +1,419 @@
+{
+  "enabled": true,
+  "status": "running",
+  "lastRunStarted": 1794580148579,
+  "lastRunFinished": null,
+  "nextRunScheduled": 1794339173584,
+  "currentPage": 74,
+  "maxPages": 400,
+  "stats": {
+    "totalPagesScanned": 81,
+    "totalAdsFound": 1445,
+    "adsAdded": 887,
+    "adsUpdated": 557,
+    "adsExcluded": 1
+  },
+  "currentStatusMessage": "Scanare pagina 74 din 400 (Spațiere 2.2s - 3.5s anti-block)...",
+  "logs": [
+    {
+      "timestamp": 1794580148579,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 74/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794580148578,
+      "message": "Începem extragerea descrierilor reale complete pentru 670 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577603997,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 74/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577603997,
+      "message": "Începem extragerea descrierilor reale complete pentru 632 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577533944,
+      "message": "Pagina 73/400: +0 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 1151/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577529526,
+      "message": "Pagina 72/400: +5 noi, 14 actualizate, 1 excluse (trans/femei). Total în DB: 1151/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577437944,
+      "message": "Pagina 71/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 1146/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577391280,
+      "message": "Pagina 70/400: +11 noi, 8 actualizate, 0 excluse (trans/femei). Total în DB: 1132/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577323811,
+      "message": "Pagina 69/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 1121/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577274217,
+      "message": "Pagina 68/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 1107/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577270969,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 68/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794577270968,
+      "message": "Începem extragerea descrierilor reale complete pentru 701 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575785954,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 68/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575785952,
+      "message": "Începem extragerea descrierilor reale complete pentru 704 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575744689,
+      "message": "Pagina 67/400: +11 noi, 9 actualizate, 0 excluse (trans/femei). Total în DB: 1097/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575707135,
+      "message": "Pagina 66/400: +12 noi, 8 actualizate, 0 excluse (trans/femei). Total în DB: 1086/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575683457,
+      "message": "Pagina 65/400: +13 noi, 7 actualizate, 0 excluse (trans/femei). Total în DB: 1074/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575657390,
+      "message": "Pagina 64/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 1061/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575643849,
+      "message": "Pagina 63/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 1061/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575639713,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 63/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575639712,
+      "message": "Începem extragerea descrierilor reale pentru 581 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575538727,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 63/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575538726,
+      "message": "Începem extragerea descrierilor reale pentru 582 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575505471,
+      "message": "Pagina 62/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 1038/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575483420,
+      "message": "Pagina 61/400: +15 noi, 5 actualizate, 0 excluse (trans/femei). Total în DB: 1024/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575460233,
+      "message": "Pagina 60/400: +15 noi, 5 actualizate, 0 excluse (trans/femei). Total în DB: 1009/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575434766,
+      "message": "Pagina 59/400: +11 noi, 9 actualizate, 0 excluse (trans/femei). Total în DB: 994/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575409880,
+      "message": "Pagina 58/400: +1 noi, 1 actualizate, 0 excluse (trans/femei). Total în DB: 983/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575400977,
+      "message": "Pagina 56/400: +7 noi, 10 actualizate, 0 excluse (trans/femei). Total în DB: 982/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575387707,
+      "message": "Pagina 55/400: +13 noi, 7 actualizate, 0 excluse (trans/femei). Total în DB: 975/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575364134,
+      "message": "Pagina 54/400: +13 noi, 7 actualizate, 0 excluse (trans/femei). Total în DB: 962/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575336931,
+      "message": "Pagina 53/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 949/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575333230,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 53/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575333229,
+      "message": "Începem extragerea descrierilor reale pentru 758 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575140254,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 53/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575140254,
+      "message": "Începem extragerea descrierilor reale pentru 780 anunțuri existente...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575128796,
+      "message": "Pagina 52/400: +15 noi, 5 actualizate, 0 excluse (trans/femei). Total în DB: 934/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575125499,
+      "message": "Pagina 51/400: +11 noi, 8 actualizate, 0 excluse (trans/femei). Total în DB: 919/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575122603,
+      "message": "Pagina 50/400: +19 noi, 1 actualizate, 0 excluse (trans/femei). Total în DB: 908/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575119696,
+      "message": "Pagina 49/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 889/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575116657,
+      "message": "Pagina 48/400: +13 noi, 7 actualizate, 0 excluse (trans/femei). Total în DB: 875/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575112693,
+      "message": "Pagina 47/400: +13 noi, 7 actualizate, 0 excluse (trans/femei). Total în DB: 862/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575109578,
+      "message": "Pagina 46/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 849/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575106516,
+      "message": "Pagina 45/400: +16 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 835/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575102713,
+      "message": "Pagina 44/400: +15 noi, 5 actualizate, 0 excluse (trans/femei). Total în DB: 819/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575098970,
+      "message": "Pagina 43/400: +16 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 804/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575095558,
+      "message": "Pagina 42/400: +15 noi, 5 actualizate, 0 excluse (trans/femei). Total în DB: 788/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575091906,
+      "message": "Pagina 41/400: +16 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 773/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575088624,
+      "message": "Pagina 40/400: +18 noi, 2 actualizate, 0 excluse (trans/femei). Total în DB: 757/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575085526,
+      "message": "Pagina 39/400: +1 noi, 0 actualizate, 0 excluse (trans/femei). Total în DB: 739/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575082581,
+      "message": "Pagina 38/400: +0 noi, 12 actualizate, 0 excluse (trans/femei). Total în DB: 738/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575079773,
+      "message": "Pagina 37/400: +0 noi, 13 actualizate, 0 excluse (trans/femei). Total în DB: 738/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575076374,
+      "message": "Pagina 36/400: +1 noi, 19 actualizate, 0 excluse (trans/femei). Total în DB: 738/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575073083,
+      "message": "Pagina 35/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 737/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575069961,
+      "message": "Pagina 34/400: +15 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 723/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575066205,
+      "message": "Pagina 33/400: +16 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 708/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575062565,
+      "message": "Pagina 32/400: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 692/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575059738,
+      "message": "Pagina 31/400: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 675/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575050014,
+      "message": "Pagina 30/400: +14 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 658/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575046112,
+      "message": "Pagina 29/400: +8 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 644/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575042457,
+      "message": "Pagina 28/400: +9 noi, 1 actualizate, 0 excluse (trans/femei). Total în DB: 636/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575036215,
+      "message": "Pagina 26/400: +15 noi, 5 actualizate, 0 excluse (trans/femei). Total în DB: 627/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575033314,
+      "message": "Pagina 25/400: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 612/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575029760,
+      "message": "Pagina 24/400: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 595/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575026302,
+      "message": "Pagina 23/400: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 578/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575022724,
+      "message": "Pagina 22/400: +12 noi, 8 actualizate, 0 excluse (trans/femei). Total în DB: 561/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575019200,
+      "message": "Pagina 21/400: +20 noi, 0 actualizate, 0 excluse (trans/femei). Total în DB: 549/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575015170,
+      "message": "Pagina 20/400: +16 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 529/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575012068,
+      "message": "Pagina 19/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 513/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575008677,
+      "message": "Pagina 18/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 513/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794575004548,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 18/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565824591,
+      "message": "Pagina 17/400: +19 noi, 1 actualizate, 0 excluse (trans/femei). Total în DB: 474/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565821786,
+      "message": "Pagina 16/400: +14 noi, 6 actualizate, 0 excluse (trans/femei). Total în DB: 455/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565818388,
+      "message": "Pagina 15/400: +0 noi, 20 actualizate, 0 excluse (trans/femei). Total în DB: 441/5000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565814710,
+      "message": "A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina 15/400)...",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565804089,
+      "message": "Pagina 14/250: +16 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 425/4000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565800618,
+      "message": "Pagina 13/250: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 409/4000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565797096,
+      "message": "Pagina 12/250: +9 noi, 0 actualizate, 0 excluse (trans/femei). Total în DB: 392/4000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565793517,
+      "message": "Pagina 11/250: +1 noi, 4 actualizate, 0 excluse (trans/femei). Total în DB: 383/4000.",
+      "type": "info"
+    },
+    {
+      "timestamp": 1794565790399,
+      "message": "Pagina 10/250: +17 noi, 3 actualizate, 0 excluse (trans/femei). Total în DB: 382/4000.",
+      "type": "info"
+    }
+  ]
+}

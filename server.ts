@@ -43,8 +43,17 @@ const client = wrapper(axios.create({
 }));
 console.log("[SERVER] Axios client with cookie jar initialized.");
 
+// IPv4 HTTPS agent prevents 10s+ IPv6 hangs against Cloudflare/BursaPlacerilor
+const ipv4HttpsAgent = new https.Agent({
+  family: 4,
+  keepAlive: true,
+  rejectUnauthorized: false
+});
+
 // Create a base client
-const baseClient = axios.create();
+const baseClient = axios.create({
+  httpsAgent: ipv4HttpsAgent
+});
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -164,6 +173,67 @@ function cleanPhoneDigits(raw: string | null | undefined): string {
     digits = "0" + digits.slice(2);
   }
   return digits;
+}
+
+/**
+ * Extract the full, untruncated listing title from HTML without chopping user pipes ("|")
+ */
+function extractFullTitleFromHtml($: cheerio.CheerioAPI): string {
+  const genericHeaders = new Set([
+    "publi24", "publi24.ro", "bursaplacerilor", "bursaplacerilor.com",
+    "escorte", "matrimoniale", "anunțuri", "anunturi", "anunț", "anunt",
+    "inspector escorte", "nimfomane"
+  ]);
+
+  let jsonLdTitle = "";
+  $("script[type='application/ld+json']").each((_, el) => {
+    try {
+      const ld = JSON.parse($(el).html() || "{}");
+      const items = Array.isArray(ld) ? ld : [ld];
+      for (const item of items) {
+        const cand = item?.name || item?.headline;
+        if (typeof cand === "string") {
+          const clean = cand.replace(/\s+/g, " ").trim();
+          if (clean.length > jsonLdTitle.length && !genericHeaders.has(clean.toLowerCase())) {
+            jsonLdTitle = clean;
+          }
+        }
+      }
+    } catch {}
+  });
+
+  let bestH1 = "";
+  $("h1").each((_, el) => {
+    const clean = $(el).text().replace(/\s+/g, " ").trim();
+    if (clean.length > bestH1.length && !genericHeaders.has(clean.toLowerCase())) {
+      bestH1 = clean;
+    }
+  });
+
+  const rawMeta = (
+    $("meta[property='og:title']").attr("content") ||
+    $("meta[name='twitter:title']").attr("content") ||
+    $("title").first().text() ||
+    ""
+  ).replace(/\s+/g, " ").trim();
+
+  const cleanMeta = rawMeta
+    .replace(/^07\d{8}\s*[-–|]\s*/i, "")
+    .replace(/\s*\|\s*(?:Escorte|Matrimoniale|Masaj|Saloane)[^|]*\|\s*BursaPlacerilor\.com.*$/i, "")
+    .replace(/\s*\|\s*(?:Bursa\s*Placerilor(?:\.com)?|Publi24(?:\.ro)?|Inspector\s*Escorte(?:\.ro)?|Nimfomane(?:\.com)?).*$/i, "")
+    .replace(/\s*-\s*(?:Bursa\s*Placerilor(?:\.com)?|Publi24(?:\.ro)?|Inspector\s*Escorte(?:\.ro)?)\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  let best = bestH1 || jsonLdTitle || cleanMeta || "";
+  if (jsonLdTitle && jsonLdTitle.length > best.length) {
+    best = jsonLdTitle;
+  }
+  if (cleanMeta && !genericHeaders.has(cleanMeta.toLowerCase()) && cleanMeta.length > best.length && !best) {
+    best = cleanMeta;
+  }
+
+  return best.replace(/\s+/g, " ").trim();
 }
 
 // Global cooldown map to track rate-limited domains
@@ -1447,11 +1517,232 @@ class InspectorEscorteScraper {
 const inspector = new InspectorEscorteScraper();
 
 // Cache for Bursa Plăcerilor full descriptions & galleries
-const bursaDetailCache = new Map<string, { desc: string; images?: string[]; phone?: string; date?: string; timestamp: number }>();
+const bursaDetailCache = new Map<string, { title?: string; desc: string; images?: string[]; phone?: string; date?: string; location?: string; timestamp: number }>();
+
+// Standard Romanian county to primary seat city mapping
+const COUNTY_CAPITAL_MAP: Record<string, string> = {
+  "alba": "Alba Iulia",
+  "arad": "Arad",
+  "arges": "Pitesti",
+  "argeș": "Pitesti",
+  "bacau": "Bacau",
+  "bacău": "Bacau",
+  "bihor": "Oradea",
+  "bistrita-nasaud": "Bistrita",
+  "bistrița-năsăud": "Bistrita",
+  "botosani": "Botosani",
+  "botoșani": "Botosani",
+  "braila": "Braila",
+  "brăila": "Braila",
+  "brasov": "Brasov",
+  "brașov": "Brasov",
+  "bucuresti": "Bucuresti",
+  "bucurești": "Bucuresti",
+  "buzau": "Buzau",
+  "buzău": "Buzau",
+  "calarasi": "Calarasi",
+  "călărași": "Calarasi",
+  "caras-severin": "Resita",
+  "caraș-severin": "Resita",
+  "cluj": "Cluj-Napoca",
+  "constanta": "Constanta",
+  "constanța": "Constanta",
+  "covasna": "Sfantu Gheorghe",
+  "dambovita": "Targoviste",
+  "dâmbovița": "Targoviste",
+  "dolj": "Craiova",
+  "galati": "Galati",
+  "galați": "Galati",
+  "giurgiu": "Giurgiu",
+  "gorj": "Targu Jiu",
+  "harghita": "Miercurea Ciuc",
+  "hunedoara": "Deva",
+  "ialomita": "Slobozia",
+  "ialomița": "Slobozia",
+  "iasi": "Iasi",
+  "iași": "Iasi",
+  "ilfov": "Bucuresti",
+  "maramures": "Baia Mare",
+  "maramureș": "Baia Mare",
+  "mehedinti": "Drobeta-Turnu Severin",
+  "mehedinți": "Drobeta-Turnu Severin",
+  "mures": "Targu Mures",
+  "mureș": "Targu Mures",
+  "neamt": "Piatra Neamt",
+  "neamț": "Piatra Neamt",
+  "olt": "Slatina",
+  "prahova": "Ploiesti",
+  "salaj": "Zalau",
+  "sălaj": "Zalau",
+  "satu mare": "Satu Mare",
+  "satu-mare": "Satu Mare",
+  "sibiu": "Sibiu",
+  "suceava": "Suceava",
+  "teleorman": "Alexandria",
+  "timis": "Timisoara",
+  "timiș": "Timisoara",
+  "tulcea": "Tulcea",
+  "valcea": "Ramnicu Valcea",
+  "vâlcea": "Ramnicu Valcea",
+  "vaslui": "Vaslui",
+  "vrancea": "Focsani"
+};
+
+// Known secondary cities to scan for in titles/descriptions
+const KNOWN_SECONDARY_CITIES = [
+  "Lugoj", "Medias", "Turda", "Dej", "Campia Turzii", "Gherla", "Campina", "Sinaia", "Busteni", "Mizil",
+  "Valenii de Munte", "Onesti", "Moinesti", "Comanesti", "Fagaras", "Sacele", "Zarnesti", "Codlea", "Rasnov",
+  "Mangalia", "Medgidia", "Navodari", "Cernavoda", "Mamaia", "Eforie", "Costinesti", "Vama Veche",
+  "Hunedoara", "Petrosani", "Lupeni", "Vulcan", "Petrila", "Orastie", "Brad", "Pascani", "Harlau",
+  "Sighetu Marmatiei", "Borsa", "Sighisoara", "Reghin", "Tarnaveni", "Roman", "Targu Neamt", "Caracal",
+  "Bals", "Falticeni", "Radauti", "Campulung Moldovenesc", "Vatra Dornei", "Gura Humorului", "Rosiorii de Vede",
+  "Turnu Magurele", "Dragashani", "Barlad", "Husi", "Adjud", "Petrosani", "Dorohoi", "Campulung", "Curtea de Arges",
+  "Mioveni", "Sannicolau Mare", "Jimbolia", "Voluntari", "Otopeni", "Bragadiru", "Popesti-Leordeni", "Buftea"
+];
+
+function resolveBursaLocation(metaText: string, link: string, title?: string, desc?: string, explicitCounty?: string): string {
+  const combinedText = `${metaText} ${link} ${title || ''} ${desc || ''}`;
+
+  // 1. Check for Bucharest Sector
+  const sectorMatch = combinedText.match(/sector(?:ul)?[-_\s]*([1-6])/i);
+  if (sectorMatch) {
+    return `Bucuresti, Sector ${sectorMatch[1]}`;
+  }
+
+  // 2. If it's Bucharest without a detected sector
+  if (combinedText.toLowerCase().includes("bucuresti") || combinedText.toLowerCase().includes("bucurești")) {
+    return "Bucuresti";
+  }
+
+  // 3. Check for specific secondary cities in the title, link slug or text
+  const cleanLinkAndTitle = `${link} ${title || ''} ${desc ? desc.slice(0, 300) : ''}`.toLowerCase();
+  for (const c of KNOWN_SECONDARY_CITIES) {
+    const cSlug = c.toLowerCase().replace(/\s+/g, '-');
+    const cClean = c.toLowerCase();
+    if (
+      cleanLinkAndTitle.includes(`/${cSlug}/`) || 
+      cleanLinkAndTitle.includes(`-${cSlug}-`) ||
+      new RegExp(`\\b${cClean}\\b`, 'i').test(cleanLinkAndTitle)
+    ) {
+      return c;
+    }
+  }
+
+  // 4. Try to match the county from the meta text, link, or explicit search county
+  let countySlug = (explicitCounty || "").toLowerCase().trim();
+  if (!countySlug) {
+    const linkMatch = link.match(/bursaplacerilor\.com\/([a-z-]+)\//);
+    if (linkMatch && linkMatch[1] && !['uploads', 'assets', 'telefon', 'cautare'].includes(linkMatch[1])) {
+      countySlug = linkMatch[1];
+    }
+  }
+
+  if (!countySlug && metaText) {
+    const cleanMeta = metaText.replace(/📍/g, '').split('·')[0].split(',')[0].trim().toLowerCase();
+    countySlug = cleanMeta.replace(/ă/g, "a").replace(/â/g, "a").replace(/î/g, "i").replace(/ș/g, "s").replace(/ş/g, "s").replace(/ț/g, "t").replace(/ţ/g, "t");
+  }
+
+  if (countySlug && COUNTY_CAPITAL_MAP[countySlug]) {
+    return COUNTY_CAPITAL_MAP[countySlug];
+  }
+
+  return metaText || (explicitCounty ? explicitCounty.charAt(0).toUpperCase() + explicitCounty.slice(1) : "România");
+}
 
 /**
- * Bursa Plăcerilor (bursaplacerilor.com) Scraper Logic
+ * Canonical 9-digit phone extractor (e.g. 7xxxxxxxx) for strict deduplication
  */
+function getNormalizedPhone(item: { revealedPhone?: string; phoneNumber?: string; link?: string }): string {
+  if (!item) return '';
+  let raw = item.revealedPhone || '';
+  if (!raw && item.phoneNumber && !item.phoneNumber.toLowerCase().includes('click') && !item.phoneNumber.toLowerCase().includes('reveal')) {
+    raw = item.phoneNumber;
+  }
+  if (!raw && item.link) {
+    const m = item.link.match(/\/(\d{10})\//);
+    if (m) raw = m[1];
+  }
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 9) {
+    return digits.slice(-9);
+  }
+  return '';
+}
+
+/**
+ * Filter out transexual, ts, trans, trasexuala, pentru femei / doamne, gay/lesbi
+ */
+function isExcludedListing(item: { title?: string; description?: string; link?: string; location?: string; category?: string }): boolean {
+  if (!item) return false;
+  const rawText = `${item.title || ''} ${item.description || ''} ${item.link || ''} ${item.location || ''} ${item.category || ''}`.toLowerCase();
+  
+  // Normalize diacritics
+  const text = rawText
+    .replace(/ă/g, "a").replace(/â/g, "a").replace(/î/g, "i")
+    .replace(/ș/g, "s").replace(/ş/g, "s").replace(/ț/g, "t").replace(/ţ/g, "t");
+
+  // 1. Direct URL path checks
+  if (/\/gay-lesbi\//i.test(text) || /\/transex\w*\//i.test(text) || /\/ts\//i.test(text)) return true;
+
+  // 2. Direct category & badge text checks
+  if (text.includes("transexuale") || text.includes("gay-lesbi") || text.includes("travesti")) return true;
+
+  // 3. Regex patterns for trans / transexual / trasexuala / ts
+  const transPatterns = [
+    /\btrans\b/i,
+    /\btrans[_-]/i,
+    /\btransex\w*/i,
+    /\btranssex\w*/i,
+    /\btrasex\w*/i,
+    /\btranx\w*/i,
+    /\btransx\w*/i,
+    /\btravesti\w*/i,
+    /\bshe-?male\b/i,
+    /\blady-?boy\b/i,
+    /\bcrossdress\w*/i,
+    /\bfemboy\b/i,
+    /\bfemboi\b/i,
+    /\bgay-?lesbi\b/i,
+    /\bfata\s+trans\b/i,
+    /\btrans\s+(reala|draguta|superba|noua|activa|pasiva|versatila|sexy|fata|model|fem)\b/i,
+    /\bts\b/i,
+    /\bts\s+/i,
+    /\bts\d/i,
+    /\bts[_-]/i,
+    /\bbby\s+ts\b/i,
+    /\bmasaj\s+yoni\b/i
+  ];
+
+  for (const pat of transPatterns) {
+    if (pat.test(text)) return true;
+  }
+
+  // 4. Regex patterns for "pentru femei", "pt femei", "pt doamne", "pentru doamne", "domnisoare si doamne"
+  const pentruFemeiPatterns = [
+    /\b(pentru|pt\.?)\s+(femei|doamne|domnisoare)/i,
+    /\bdoamne\s+si\s+domnisoare\b/i,
+    /\bdomnisoare\s+si\s+doamne\b/i,
+    /\bdoamnelor\s+si\s+domnisoarelor\b/i,
+    /\bdomnisoarelor\s+si\s+doamnelor\b/i,
+    /\b(pentru|pt\.?)\s+.*?\bdoamne\b/i,
+    /\bdoamne\s+si\s+cupluri\b/i,
+    /\bcupluri\s+si\s+doamne\b/i,
+    /\b(domni|barbati)\s*,\s*doamne\b/i,
+    /\b(domni|barbati)\s+si\s+doamne\b/i,
+    /\b(dedicat|adresat)\s+(doamnelor|femeilor)/i,
+    /\bdoar\s+(pentru|pt\.?)\s+(doamne|femei)/i,
+    /\bmaseur\s+(domn|barbat)\b/i,
+    /\bbarbat\s+(pentru|pt\.?)\s+(doamne|femei)/i,
+    /\bdomn\s+(pentru|pt\.?)\s+(doamne|femei)/i,
+    /\bservicii\s+(pentru|pt\.?)\s+(doamne|femei)/i
+  ];
+
+  for (const pat of pentruFemeiPatterns) {
+    if (pat.test(text)) return true;
+  }
+
+  return false;
+}
 class BursaPlacerilorScraper {
   private baseUrl = "https://bursaplacerilor.com";
 
@@ -1463,9 +1754,10 @@ class BursaPlacerilorScraper {
       .replace(/\s+/g, "-");
   }
 
-  async fetchSingleRemotePage(countySlug: string, query: string, remotePage: number): Promise<{ cards: any[]; maxPage: number }> {
+  async fetchSingleRemotePage(countySlug: string, query: string, remotePage: number, sectorSlug = ""): Promise<{ cards: any[]; maxPage: number }> {
     const params: string[] = [];
     if (countySlug) params.push(`judet=${encodeURIComponent(countySlug)}`);
+    if (sectorSlug) params.push(`sector=${encodeURIComponent(sectorSlug)}`);
     if (query) params.push(`q=${encodeURIComponent(query)}`);
     if (remotePage > 1) params.push(`pagina=${remotePage}`);
 
@@ -1501,8 +1793,14 @@ class BursaPlacerilorScraper {
         const img = $(el).find("img").attr("data-src") || $(el).find("img").attr("src") || "";
         const fullImg = img.startsWith("http") ? img : `${this.baseUrl}${img.startsWith('/') ? '' : '/'}${img}`;
         
-        let metaText = $(el).find(".card-meta span").first().text().replace(/📍/g, "").trim();
-        if (metaText.includes("·")) metaText = metaText.split("·")[0].trim();
+        const fullMetaText = $(el).find(".card-meta").text().replace(/📍/g, "").trim();
+        let metaLocation = fullMetaText;
+        let category = "";
+        if (fullMetaText.includes("·")) {
+          const parts = fullMetaText.split("·");
+          metaLocation = parts[0].trim();
+          category = parts.slice(1).join("·").trim();
+        }
         
         let phone = $(el).find(".card-phone-num").text().replace(/\D/g, "").trim();
         if (!phone) {
@@ -1510,8 +1808,16 @@ class BursaPlacerilorScraper {
           if (m) phone = m[1];
         }
 
+        // Check exclusion immediately at card extraction level
+        if (isExcludedListing({ title, link: fullLink, location: metaLocation, category })) {
+          return;
+        }
+
         const views = $(el).find(".card-views").text().replace(/\D/g, "").trim();
         const adId = `bp-${phone || ''}-${link.replace(/[^\w]/g, '').slice(-16)}`;
+
+        // Accurately resolve city and sector from card metadata, link slug, title, and county
+        const resolvedLocation = resolveBursaLocation(metaLocation, fullLink, title, "", countySlug);
 
         cards.push({
           id: adId,
@@ -1520,7 +1826,8 @@ class BursaPlacerilorScraper {
           link: fullLink,
           image: fullImg,
           images: fullImg ? [fullImg] : [],
-          location: metaText || (countySlug ? countySlug.charAt(0).toUpperCase() + countySlug.slice(1) : "România"),
+          location: resolvedLocation,
+          category,
           date: views ? `${views} vizualizări` : "Recent",
           description: `Anunț publicat pe BursaPlacerilor.com${phone ? ' • Tel: ' + phone : ''}`,
           price: "N/A",
@@ -1537,22 +1844,31 @@ class BursaPlacerilorScraper {
     }
   }
 
-  async search(query: string, page = 1, county = "", city = "", limit = 100) {
+  async search(query: string, page = 1, county = "", city = "", limit = 100, sector = "") {
     const start = Date.now();
-    const countySlug = this.getCountySlug(county || city);
+    const countySlug = this.getCountySlug(county || (city && city.toLowerCase().includes("sector") ? "bucuresti" : city));
+    
+    // Normalize sector if passed directly or via city
+    let sectorSlug = (sector || "").toLowerCase().trim();
+    if (!sectorSlug && city && city.toLowerCase().includes("sector")) {
+      const sm = city.match(/sector[-_\s]*([1-6])/i);
+      if (sm) sectorSlug = `sector-${sm[1]}`;
+    }
+
     const cleanQuery = (query || "").trim();
     const limitNum = Math.min(100, Math.max(1, limit || 100));
 
-    // Each remote page on bursaplacerilor has 20 cards.
-    // For 100 results per page, fetch 5 remote pages in parallel:
-    const remotePagesCount = Math.max(1, Math.ceil(limitNum / 20));
+    // For 100 results per page, fetch buffer remote pages in parallel (e.g. 7 pages = 140 raw cards)
+    // so after phone deduplication and category exclusion, we still deliver up to 100 results!
+    const bufferPages = limitNum >= 50 ? 2 : 1;
+    const remotePagesCount = Math.max(1, Math.ceil(limitNum / 20) + bufferPages);
     const startRemotePage = (page - 1) * remotePagesCount + 1;
     const remotePages = Array.from({ length: remotePagesCount }, (_, i) => startRemotePage + i);
 
-    console.log(`[BURSAPLACERILOR] Searching: query="${cleanQuery}", county="${countySlug}", page=${page}, remotePages=[${remotePages.join(',')}], limit=${limitNum}`);
+    console.log(`[BURSAPLACERILOR] Searching: query="${cleanQuery}", county="${countySlug}", sector="${sectorSlug}", page=${page}, remotePages=[${remotePages.join(',')}], limit=${limitNum}`);
 
     const responses = await Promise.all(
-      remotePages.map(p => this.fetchSingleRemotePage(countySlug, cleanQuery, p))
+      remotePages.map(p => this.fetchSingleRemotePage(countySlug, cleanQuery, p, sectorSlug))
     );
 
     const allCards: any[] = [];
@@ -1563,15 +1879,22 @@ class BursaPlacerilorScraper {
       allCards.push(...res.cards);
     }
 
-    // Deduplicate by normalized link
-    const seen = new Set<string>();
+    // Strict Deduplication by normalized link AND normalized phone number
+    const seenLinks = new Set<string>();
+    const seenPhones = new Set<string>();
     const uniqueListings: any[] = [];
     for (const card of allCards) {
-      const key = (card.link || "").split("?")[0].replace(/\/$/, "").toLowerCase();
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        uniqueListings.push(card);
-      }
+      if (isExcludedListing(card)) continue;
+
+      const linkKey = (card.link || "").split("?")[0].replace(/\/$/, "").toLowerCase();
+      const cleanPhone = getNormalizedPhone(card);
+
+      if (linkKey && seenLinks.has(linkKey)) continue;
+      if (cleanPhone && seenPhones.has(cleanPhone)) continue;
+
+      if (linkKey) seenLinks.add(linkKey);
+      if (cleanPhone) seenPhones.add(cleanPhone);
+      uniqueListings.push(card);
     }
 
     const finalResults = uniqueListings.slice(0, limitNum);
@@ -1580,41 +1903,77 @@ class BursaPlacerilorScraper {
     // Fast-enrich listings: apply cached details immediately, then enrich uncached listings within a strict timeout budget
     await this.enrichListingsWithDescriptions(finalResults, 2500);
 
-    console.log(`[BURSAPLACERILOR] Finished in ${Date.now() - start}ms: found ${finalResults.length} listings (total est: ${totalResults})`);
+    // Post-enrichment filter pass (in case description fetched reveals trans/pentru femei keywords)
+    const postEnrichFiltered = finalResults.filter(card => !isExcludedListing(card));
+
+    console.log(`[BURSAPLACERILOR] Finished in ${Date.now() - start}ms: found ${postEnrichFiltered.length} listings (total est: ${totalResults})`);
     return {
-      listings: finalResults,
+      listings: postEnrichFiltered,
       totalResults
     };
   }
 
-  async fetchListingDetailDirect(link: string): Promise<{ desc?: string; images?: string[]; date?: string; phone?: string } | null> {
+  async fetchListingDetailDirect(link: string): Promise<{ title?: string; desc?: string; images?: string[]; date?: string; phone?: string; location?: string } | null> {
     if (!link) return null;
     const now = Date.now();
     const CACHE_TIME = 2 * 60 * 60 * 1000;
     const cached = bursaDetailCache.get(link);
     if (cached && (now - cached.timestamp < CACHE_TIME) && cached.desc && cached.desc.length > 5) {
       return {
+        title: cached.title,
         desc: cached.desc,
         images: cached.images,
         date: cached.date,
+        location: cached.location,
         phone: cached.phone
       };
     }
 
     try {
       const resp = await axios.get(link, {
-        headers: getHeaders(this.baseUrl),
-        timeout: 4000,
+        headers: {
+          "User-Agent": USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7",
+          "Referer": this.baseUrl
+        },
+        httpsAgent: ipv4HttpsAgent,
+        timeout: 12000,
         validateStatus: (s) => s < 400
       });
 
       if (!resp || !resp.data || typeof resp.data !== "string") return null;
 
       const $ = cheerio.load(resp.data);
-      let desc = $(".anunt-desc p").text().trim() ||
-                 $(".anunt-desc").text().replace(/^Descriere\s*/i, "").trim() ||
-                 $("meta[name='description']").attr("content") ||
-                 $("meta[property='og:description']").attr("content") || "";
+      
+      // 1. Extract full HTML description from .anunt-desc (JSON-LD on BursaPlacerilor truncates at 300 chars!)
+      let htmlDesc = "";
+      if ($(".anunt-desc").length > 0) {
+        const descClone = $(".anunt-desc").first().clone();
+        descClone.find("h1, h2, h3, h4, script, style, .ad-of-wrap, button").remove();
+        descClone.find("br").replaceWith(" ");
+        htmlDesc = descClone.text().replace(/^Descriere\s*/i, "").replace(/\s+/g, " ").trim();
+      }
+
+      // 2. Also read JSON-LD description as fallback / length comparison
+      let jsonLdDesc = "";
+      $("script[type='application/ld+json']").each((_, el) => {
+        try {
+          const ld = JSON.parse($(el).html() || "{}");
+          const items = Array.isArray(ld) ? ld : [ld];
+          for (const item of items) {
+            if (item && typeof item.description === "string" && item.description.trim().length > jsonLdDesc.length) {
+              jsonLdDesc = item.description.replace(/\s+/g, " ").trim();
+            }
+          }
+        } catch {}
+      });
+
+      let desc = htmlDesc.length >= jsonLdDesc.length ? htmlDesc : jsonLdDesc;
+      if (!desc) {
+        desc = ($("meta[name='description']").attr("content") ||
+                $("meta[property='og:description']").attr("content") || "").trim();
+      }
 
       desc = desc.replace(/^Descriere\s*/i, "").replace(/\s+/g, ' ').trim();
 
@@ -1644,18 +2003,34 @@ class BursaPlacerilorScraper {
         if (telLink) phone = telLink;
       }
 
+      // Extract precise location from breadcrumb & page content
+      let breadcrumbLoc = "";
+      $(".breadcrumb a, .breadcrumb span").each((_, sp) => {
+        const t = $(sp).text().trim();
+        if (t && (t.includes("Sector") || t.includes("Bucure") || t.includes("Cluj") || t.includes("Timi") || t.includes("Iași") || t.includes("Brașov") || t.includes("Constan") || t.includes("Prahova"))) {
+          if (!breadcrumbLoc.includes(t)) breadcrumbLoc += (breadcrumbLoc ? " " : "") + t;
+        }
+      });
+
+      const title = extractFullTitleFromHtml($);
+      const resolvedLoc = resolveBursaLocation(breadcrumbLoc, link, title, desc);
+
       const result = {
+        title: title || undefined,
         desc: desc && desc.length > 5 ? desc : undefined,
         images: images.length > 0 ? images : undefined,
         date: dateBadge || undefined,
+        location: resolvedLoc || undefined,
         phone
       };
 
-      if (result.desc) {
+      if (result.desc || result.location) {
         bursaDetailCache.set(link, {
-          desc: result.desc,
+          title: result.title,
+          desc: result.desc || "",
           images: result.images,
           date: result.date,
+          location: result.location,
           phone: result.phone,
           timestamp: Date.now()
         });
@@ -1667,7 +2042,7 @@ class BursaPlacerilorScraper {
     }
   }
 
-  async enrichListingsWithDescriptions(listings: any[], maxTimeMs = 2500): Promise<void> {
+  async enrichListingsWithDescriptions(listings: any[], maxTimeMs = 5000): Promise<void> {
     if (!listings || listings.length === 0) return;
     const now = Date.now();
     const CACHE_TIME = 2 * 60 * 60 * 1000; // 2 hours
@@ -1677,9 +2052,15 @@ class BursaPlacerilorScraper {
       if (!item.link) continue;
       const cached = bursaDetailCache.get(item.link);
       if (cached && (now - cached.timestamp < CACHE_TIME) && cached.desc && cached.desc.length > 5) {
+        if (cached.title && (!item.title || item.title.endsWith("...") || item.title.endsWith("…") || cached.title.length > item.title.length)) {
+          item.title = cached.title;
+        }
         item.description = cached.desc;
         if (cached.images && cached.images.length > 0) item.images = cached.images;
         if (cached.date) item.date = cached.date;
+        if (cached.location && (!item.location || item.location === "România" || !item.location.includes("Sector"))) {
+          item.location = cached.location;
+        }
       } else {
         toFetch.push(item);
       }
@@ -1687,18 +2068,24 @@ class BursaPlacerilorScraper {
 
     if (toFetch.length === 0) return;
 
-    // Concurrently fetch the first 15 uncached ads with a hard timeout
-    const targetSlice = toFetch.slice(0, 15);
+    // Concurrently fetch the first 25 uncached ads with a hard timeout
+    const targetSlice = toFetch.slice(0, 25);
     const fetchPromises = targetSlice.map(async (item) => {
-      const details = await this.fetchListingDetailDirect(item.link);
-      if (details) {
-        if (details.desc) item.description = details.desc;
-        if (details.images && details.images.length > 0) {
-          item.images = details.images;
-          item.image = details.images[0];
+      try {
+        const details = await this.fetchListingDetailDirect(item.link);
+        if (details) {
+          if (details.title && (!item.title || item.title.endsWith("...") || item.title.endsWith("…") || details.title.length > item.title.length)) {
+            item.title = details.title;
+          }
+          if (details.desc) item.description = details.desc;
+          if (details.images && details.images.length > 0) {
+            item.images = details.images;
+            item.image = details.images[0];
+          }
+          if (details.date) item.date = details.date;
+          if (details.location) item.location = details.location;
         }
-        if (details.date) item.date = details.date;
-      }
+      } catch {}
     });
 
     const timeoutPromise = new Promise((resolve) => setTimeout(resolve, maxTimeMs));
@@ -1711,8 +2098,13 @@ const bursaplacerilor = new BursaPlacerilorScraper();
 async function startServer() {
   console.log(`[SERVER] startServer() called at ${new Date().toISOString()}`);
   try {
+    let portFromArg = 3000;
+    const portArgIndex = process.argv.indexOf('--port');
+    if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+      portFromArg = parseInt(process.argv[portArgIndex + 1], 10) || 3000;
+    }
+    const PORT = Number(process.env.PORT) || portFromArg || 3000;
     const app = express();
-    const PORT = 3000;
 
   app.use(express.json({ limit: "20mb" }));
 
@@ -2206,8 +2598,9 @@ async function startServer() {
     console.log(`[ROUTE] /api/scrape START - county: ${county}, city: ${city}, page: ${pageNum}, query: "${query}", limit: ${limitNum}`);
 
     try {
-      // 20 items per remote page on Publi24 -> for 100 items, fetch 5 remote pages in parallel
-      const remotePagesCount = Math.max(1, Math.ceil(limitNum / 20));
+      // 20 items per remote page on Publi24 -> for 100 items, fetch buffer remote pages in parallel
+      const bufferPages = limitNum >= 50 ? 2 : 1;
+      const remotePagesCount = Math.max(1, Math.ceil(limitNum / 20) + bufferPages);
       const startRemotePage = (pageNum - 1) * remotePagesCount + 1;
       const remotePages = Array.from({ length: remotePagesCount }, (_, i) => startRemotePage + i);
 
@@ -2233,14 +2626,28 @@ async function startServer() {
         return url.split('?')[0].split('#')[0].trim().replace(/\/$/, '').toLowerCase();
       };
 
-      // Filter out duplicate listings based on normalized link
-      const uniqueListings = allListings.filter((item, index, self) =>
-        item.link && index === self.findIndex((t) => normalizeLink(t.link) === normalizeLink(item.link))
-      );
+      // Strict Deduplication by normalized link AND phone number
+      const seenLinks = new Set<string>();
+      const seenPhones = new Set<string>();
+      const uniqueListings: any[] = [];
+
+      for (const item of allListings) {
+        if (!item || isExcludedListing(item)) continue;
+
+        const linkKey = normalizeLink(item.link);
+        const cleanPhone = getNormalizedPhone(item);
+
+        if (linkKey && seenLinks.has(linkKey)) continue;
+        if (cleanPhone && seenPhones.has(cleanPhone)) continue;
+
+        if (linkKey) seenLinks.add(linkKey);
+        if (cleanPhone) seenPhones.add(cleanPhone);
+        uniqueListings.push(item);
+      }
 
       const pageResults = uniqueListings.slice(0, limitNum);
 
-      console.log(`[SCRAPER] Returning ${pageResults.length} unique listings (from ${uniqueListings.length} found across ${remotePages.length} remote pages, limit: ${limitNum}) in ${Date.now() - start}ms`);
+      console.log(`[SCRAPER] Returning ${pageResults.length} unique listings (limit: ${limitNum}) in ${Date.now() - start}ms`);
       res.json({ listings: pageResults, totalResults: parsedTotalResults || uniqueListings.length });
     } catch (error: any) {
       const errorMsg = error.message || String(error);
@@ -2539,7 +2946,7 @@ async function startServer() {
       response = await fetchWithRetry(url, {
         timeout: 20000,
         headers: getHeaders(referer)
-      }, 2, true); // Use cookie jar
+      }, 2, !isBursa); // Use baseClient (ipv4HttpsAgent) for Bursa, cookie jar for Publi24/others
     } catch (err: any) {
       if (err.response?.status === 404 || err.message?.includes("404")) {
         return {
@@ -2572,11 +2979,8 @@ async function startServer() {
       bodyText.includes("nu a fost găsit") ||
       $(".ad-expired, .alert-warning:contains('expirat')").length > 0;
 
-    // Extract title
-    let title = $("h1").first().text().trim() || 
-                $("meta[property='og:title']").attr("content") || 
-                $("meta[name='twitter:title']").attr("content") || "";
-    if (title.includes("|")) title = title.split("|")[0].trim();
+    // Extract full untruncated title (JSON-LD / H1 / cleaned meta, never slicing user pipes)
+    const title = extractFullTitleFromHtml($);
 
     // Extract price
     let price = $(".price, .pret, .ad-price, [data-price], .item-price").first().text().trim() || "";
@@ -2587,13 +2991,12 @@ async function startServer() {
       const bcParts: string[] = [];
       $(".container a, .breadcrumb a, nav.navbar a").each((_, el) => {
         const t = $(el).text().trim();
-        if (t && (t.includes("Sector") || t.includes("Bucure") || t.includes("Cluj") || t.includes("Timi") || t.includes("Iași") || t.includes("Brașov") || t.includes("Constan"))) {
+        if (t && (t.includes("Sector") || t.includes("Bucure") || t.includes("Cluj") || t.includes("Timi") || t.includes("Iași") || t.includes("Brașov") || t.includes("Constan") || t.includes("Prahova"))) {
           if (!bcParts.includes(t)) bcParts.push(t);
         }
       });
-      if (bcParts.length > 0) {
-        location = bcParts.join(", ");
-      }
+      const rawBursaLoc = bcParts.join(", ") || location;
+      location = resolveBursaLocation(rawBursaLoc, url, title, $("body").text());
     }
 
     // Extract date
@@ -2684,14 +3087,51 @@ async function startServer() {
       if (nonThumb) bestImage = nonThumb;
     }
 
-    // Extract description
-    let description = $(".ad-description, .description, .ad-box-description, .listing-description, #ad-description, .ad-details-text, .ad-text, .ad-content, .ad-box-content, .ad-details-content, .ad-details-content-text, .ad-body, .ad-text-content, .listing-details-text, .listing-description-text, .ad-description-text, .ad-box-description-text, .ad-box-details-text, .ad-details-description, .ad-details-body, article p, .post-content, .entry-content, .ad-info, .ad-details").text().trim();
+    // Extract full description
+    let description = "";
+
+    // Publi24 primary container: .article-description (remove trailing "ID anunț: ...")
+    if ($(".article-description").length > 0) {
+      const artClone = $(".article-description").first().clone();
+      artClone.find("script, style").remove();
+      artClone.find("p").each((_, pEl) => {
+        if ($(pEl).text().includes("ID anunț")) $(pEl).remove();
+      });
+      artClone.find("br").replaceWith(" ");
+      description = artClone.text().replace(/\s+/g, " ").trim();
+    }
+
+    if (!description) {
+      description = $(".ad-description, .description, .ad-box-description, .listing-description, #ad-description, .ad-details-text, .ad-text, .ad-content, .ad-box-content, .ad-details-content, .ad-details-content-text, .ad-body, .ad-text-content, .listing-details-text, .listing-description-text, .ad-description-text, .ad-box-description-text, .ad-box-details-text, .ad-details-description, .ad-details-body, article p, .post-content, .entry-content, .ad-info, .ad-details").text().trim();
+    }
     
     if (isBursa) {
-      let bDesc = $(".anunt-desc p").text().trim() ||
-                  $(".anunt-desc").text().replace(/^Descriere\s*/i, "").trim() ||
-                  $("meta[name='description']").attr("content") ||
-                  $("meta[property='og:description']").attr("content") || "";
+      let htmlDesc = "";
+      if ($(".anunt-desc").length > 0) {
+        const descClone = $(".anunt-desc").first().clone();
+        descClone.find("h1, h2, h3, h4, script, style, .ad-of-wrap, button").remove();
+        descClone.find("br").replaceWith(" ");
+        htmlDesc = descClone.text().replace(/^Descriere\s*/i, "").replace(/\s+/g, " ").trim();
+      }
+
+      let jsonLdDesc = "";
+      $("script[type='application/ld+json']").each((_, el) => {
+        try {
+          const ld = JSON.parse($(el).html() || "{}");
+          const items = Array.isArray(ld) ? ld : [ld];
+          for (const item of items) {
+            if (item && typeof item.description === "string" && item.description.trim().length > jsonLdDesc.length) {
+              jsonLdDesc = item.description.replace(/\s+/g, " ").trim();
+            }
+          }
+        } catch {}
+      });
+
+      let bDesc = htmlDesc.length >= jsonLdDesc.length ? htmlDesc : jsonLdDesc;
+      if (!bDesc) {
+        bDesc = $("meta[name='description']").attr("content") ||
+                $("meta[property='og:description']").attr("content") || "";
+      }
       bDesc = bDesc.replace(/^Descriere\s*/i, "").replace(/\s+/g, ' ').trim();
       if (bDesc) description = bDesc;
     }
@@ -2910,6 +3350,49 @@ async function startServer() {
 
     try {
       const responseData = await scrapeListingFullDetails(url, false);
+
+      // Heal saved profile if it exists with an incomplete/generic description or truncated title
+      const normKey = normalizeLink(url);
+      const existingProfile = normKey ? savedProfilesMap.get(normKey) : undefined;
+      if (existingProfile && !responseData.isExpired) {
+        let updatedExisting = false;
+        if (
+          responseData.title &&
+          responseData.title !== "Anunț" &&
+          (!existingProfile.title ||
+            existingProfile.title === "Anunț" ||
+            existingProfile.title.endsWith("...") ||
+            existingProfile.title.endsWith("…") ||
+            responseData.title.length > existingProfile.title.length)
+        ) {
+          existingProfile.title = responseData.title;
+          updatedExisting = true;
+        }
+        if (
+          responseData.description &&
+          !isGenericOrEmptyDescription(responseData.description) &&
+          (isGenericOrEmptyDescription(existingProfile.description) ||
+            (existingProfile.description || "").endsWith("...") ||
+            (existingProfile.description || "").endsWith("…") ||
+            responseData.description.length > (existingProfile.description || "").length)
+        ) {
+          existingProfile.description = responseData.description;
+          updatedExisting = true;
+        }
+        if (
+          responseData.images &&
+          responseData.images.length > (existingProfile.images?.length || 0)
+        ) {
+          existingProfile.images = responseData.images;
+          existingProfile.image = responseData.image || responseData.images[0];
+          updatedExisting = true;
+        }
+        if (updatedExisting) {
+          existingProfile.lastUpdatedAt = Date.now();
+          persistSavedProfiles();
+        }
+      }
+
       res.json(responseData);
     } catch (err: any) {
       let status = err.response?.status || 500;
@@ -2955,16 +3438,16 @@ async function startServer() {
     }
   });
 
-  // API Route for scraping bursaplacerilor.com (supports up to 100 results per page)
+  // API Route for scraping bursaplacerilor.com (supports up to 100 results per page and sector filtering)
   app.get("/api/scrape-bursaplacerilor", async (req, res) => {
-    const { query = "", county = "", city = "", page = 1, limit = 100 } = req.query;
+    const { query = "", county = "", city = "", page = 1, limit = 100, sector = "" } = req.query;
     const start = Date.now();
     const pageNum = parseInt(page as string) || 1;
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 100));
-    console.log(`[ROUTE] /api/scrape-bursaplacerilor START - query: "${query}", county: ${county}, city: ${city}, page: ${pageNum}, limit: ${limitNum}`);
+    console.log(`[ROUTE] /api/scrape-bursaplacerilor START - query: "${query}", county: ${county}, city: ${city}, sector: ${sector}, page: ${pageNum}, limit: ${limitNum}`);
 
     try {
-      const result = await bursaplacerilor.search(query as string, pageNum, county as string, city as string, limitNum);
+      const result = await bursaplacerilor.search(query as string, pageNum, county as string, city as string, limitNum, sector as string);
       console.log(`[ROUTE] /api/scrape-bursaplacerilor SUCCESS - returned ${result.listings.length} listings in ${Date.now() - start}ms`);
       res.json({ listings: result.listings, totalResults: result.totalResults });
     } catch (err: any) {
@@ -2974,25 +3457,25 @@ async function startServer() {
     }
   });
 
-  // Batch enrichment for Bursa Plăcerilor listings in background
+  // Batch enrichment for Bursa Plăcerilor listings in background (descriptions, images, dates & precise locations)
   app.post("/api/enrich-bursa-descriptions", async (req, res) => {
     const { urls } = req.body;
     if (!Array.isArray(urls) || urls.length === 0) {
       return res.json({ enriched: {} });
     }
 
-    const uniqueUrls = Array.from(new Set(urls.filter((u: any) => typeof u === "string" && u.includes("bursaplacerilor")))).slice(0, 50);
-    const enriched: Record<string, { desc?: string; images?: string[]; date?: string; phone?: string }> = {};
+    const uniqueUrls = Array.from(new Set(urls.filter((u: any) => typeof u === "string" && u.includes("bursaplacerilor")))).slice(0, 100);
+    const enriched: Record<string, { title?: string; desc?: string; images?: string[]; date?: string; phone?: string; location?: string }> = {};
 
-    // Process in parallel batches of 10
-    const BATCH_SIZE = 10;
+    // Process in parallel batches of 15
+    const BATCH_SIZE = 15;
     for (let i = 0; i < uniqueUrls.length; i += BATCH_SIZE) {
       const batch = uniqueUrls.slice(i, i + BATCH_SIZE);
       await Promise.all(
         batch.map(async (url) => {
           try {
             const detail = await bursaplacerilor.fetchListingDetailDirect(url);
-            if (detail) {
+            if (detail && (detail.desc || detail.title)) {
               enriched[url] = detail;
             }
           } catch {}
@@ -3057,6 +3540,7 @@ async function startServer() {
     image: string;
     images?: string[];
     location: string;
+    category?: string;
     date?: string;
     description?: string;
     price?: string;
@@ -3105,13 +3589,23 @@ async function startServer() {
         const list = JSON.parse(raw);
         if (Array.isArray(list)) {
           savedProfilesMap.clear();
+          const seenPhones = new Set<string>();
           for (const item of list) {
+            if (isExcludedListing(item)) continue;
             if (item.revealedPhone) item.revealedPhone = item.revealedPhone.replace(/\s+/g, '');
             if (item.phoneNumber && /\d/.test(item.phoneNumber)) item.phoneNumber = item.phoneNumber.replace(/\s+/g, '');
+            
+            const cleanPhone = getNormalizedPhone(item);
+            if (cleanPhone && seenPhones.has(cleanPhone)) {
+              // skip duplicate phone in saved archive
+              continue;
+            }
+            if (cleanPhone) seenPhones.add(cleanPhone);
+
             const key = normalizeLink(item.link) || String(item.id || item.adId);
             savedProfilesMap.set(key, item);
           }
-          console.log(`[STORAGE] Loaded ${savedProfilesMap.size} saved profiles from disk.`);
+          console.log(`[STORAGE] Loaded ${savedProfilesMap.size} clean saved profiles from disk (excluded trans & duplicate phones).`);
           persistSavedProfiles();
         }
       }
@@ -3120,9 +3614,26 @@ async function startServer() {
     }
   }
 
+  const MAX_DATABASE_PROFILES = 5000;
+
   function persistSavedProfiles() {
     try {
-      const list = Array.from(savedProfilesMap.values());
+      let list = Array.from(savedProfilesMap.values());
+      // Sort newest first
+      list.sort((a, b) => (b.lastUpdatedAt || b.savedAt || 0) - (a.lastUpdatedAt || a.savedAt || 0));
+
+      // Strictly enforce MAX_DATABASE_PROFILES (5000)
+      if (list.length > MAX_DATABASE_PROFILES) {
+        const excess = list.length - MAX_DATABASE_PROFILES;
+        list = list.slice(0, MAX_DATABASE_PROFILES);
+        savedProfilesMap.clear();
+        for (const item of list) {
+          const key = normalizeLink(item.link) || String(item.id || item.adId);
+          savedProfilesMap.set(key, item);
+        }
+        console.log(`[STORAGE] Pruned ${excess} oldest profiles to maintain ${MAX_DATABASE_PROFILES} max database capacity.`);
+      }
+
       const tempPath = `${PROFILES_FILE}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(list, null, 2), "utf-8");
       fs.renameSync(tempPath, PROFILES_FILE);
@@ -3177,6 +3688,22 @@ async function startServer() {
         results = results.filter(p => p.status === status);
       }
 
+      // Always filter out trans, ts, trasexuala, pentru femei / doamne
+      results = results.filter(p => !isExcludedListing(p));
+
+      // Strict phone deduplication for saved profiles
+      const seenPhones = new Set<string>();
+      const dedupedResults: any[] = [];
+      for (const p of results) {
+        const cleanPhone = getNormalizedPhone(p);
+        if (cleanPhone && seenPhones.has(cleanPhone)) {
+          continue;
+        }
+        if (cleanPhone) seenPhones.add(cleanPhone);
+        dedupedResults.push(p);
+      }
+      results = dedupedResults;
+
       // Sort by lastUpdatedAt (descending)
       results.sort((a, b) => (b.lastUpdatedAt || b.savedAt || 0) - (a.lastUpdatedAt || a.savedAt || 0));
 
@@ -3205,6 +3732,35 @@ async function startServer() {
 
       for (const item of itemsToSave) {
         if (!item.link && !item.id) continue;
+        // Do not archive excluded profiles (trans, ts, trasexuala, pentru femei / doamne)
+        if (isExcludedListing(item)) continue;
+
+        // Check if another profile already exists with this exact phone number
+        const itemPhone = getNormalizedPhone(item);
+        if (itemPhone) {
+          let phoneConflictKey: string | null = null;
+          for (const [k, p] of savedProfilesMap.entries()) {
+            if (getNormalizedPhone(p) === itemPhone) {
+              phoneConflictKey = k;
+              break;
+            }
+          }
+          if (phoneConflictKey) {
+            // Update the existing profile rather than creating a duplicate phone entry
+            const existing = savedProfilesMap.get(phoneConflictKey)!;
+            existing.lastUpdatedAt = now;
+            if (item.description && item.description.length > (existing.description || "").length) {
+              existing.description = item.description;
+            }
+            if (item.images && item.images.length > (existing.images || []).length) {
+              existing.images = item.images;
+              existing.image = item.images[0];
+            }
+            savedCount++;
+            continue;
+          }
+        }
+
         const key = normalizeLink(item.link) || String(item.id || item.adId);
         const existing = savedProfilesMap.get(key);
 
@@ -3524,6 +4080,632 @@ async function startServer() {
 
       persistSavedProfiles();
       res.json({ success: true, deleted, totalArchived: savedProfilesMap.size });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // BURSA PLĂCERILOR WEEKLY AUTO-CRAWLER ENGINE
+  // ==========================================
+  const CRAWLER_STATE_FILE = path.join(PROFILES_DIR, "bursa_crawler_state.json");
+  const CRAWLER_WEEK_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  interface CrawlerLogEntry {
+    timestamp: number;
+    message: string;
+    type: "info" | "warn" | "error" | "success";
+  }
+
+  interface BursaCrawlerState {
+    enabled: boolean;
+    status: "idle" | "running" | "paused";
+    lastRunStarted: number | null;
+    lastRunFinished: number | null;
+    nextRunScheduled: number;
+    currentPage: number;
+    maxPages: number;
+    stats: {
+      totalPagesScanned: number;
+      totalAdsFound: number;
+      adsAdded: number;
+      adsUpdated: number;
+      adsExcluded: number;
+    };
+    currentStatusMessage: string;
+    logs: CrawlerLogEntry[];
+  }
+
+  function isGenericOrEmptyDescription(desc?: string): boolean {
+    if (!desc) return true;
+    const d = desc.trim();
+    return d.length < 10 || d.includes("publicat pe BursaPlacerilor") || d.includes("No detailed description found");
+  }
+
+  class BursaWeeklyCrawler {
+    private state: BursaCrawlerState;
+    private isPaused = false;
+    private isRunning = false;
+    private isEnriching = false;
+    private timerInterval: NodeJS.Timeout | null = null;
+
+    constructor() {
+      this.state = this.loadState();
+      this.initScheduler();
+
+      // Automatically launch/resume background crawl & description backfill on server boot
+      setTimeout(() => {
+        try {
+          const missingDescCount = this.getMissingDescriptionsCount();
+          if (missingDescCount > 0 && !this.isEnriching) {
+            console.log(`[CRAWLER] Starting background real-description backfill for ${missingDescCount} Bursa profiles...`);
+            this.enrichMissingDescriptions();
+          }
+          if (this.state.enabled && savedProfilesMap.size < MAX_DATABASE_PROFILES && !this.isRunning) {
+            console.log(`[CRAWLER] Auto-starting weekly crawl on server launch (${savedProfilesMap.size}/${MAX_DATABASE_PROFILES} ads in DB)...`);
+            this.startCrawl(false);
+          }
+        } catch (e: any) {
+          console.warn("[CRAWLER] Auto-start error on boot:", e.message);
+        }
+      }, 3500);
+    }
+
+    private needsDescriptionBackfill(p: SavedProfile): boolean {
+      if (!(p.source === "bursaplacerilor" || (p.link && p.link.includes("bursaplacerilor.com")))) return false;
+      if (isGenericOrEmptyDescription(p.description)) return true;
+      const len = (p.description || "").trim().length;
+      if (len >= 290 && len <= 302 && p.lastCheckedStatus !== "Descriere completă (.anunt-desc)") {
+        return true;
+      }
+      return false;
+    }
+
+    public getMissingDescriptionsCount(): number {
+      let count = 0;
+      for (const p of savedProfilesMap.values()) {
+        if (this.needsDescriptionBackfill(p)) {
+          count++;
+        }
+      }
+      return count;
+    }
+
+    public async enrichMissingDescriptions(limit = 1500) {
+      if (this.isEnriching) return;
+      this.isEnriching = true;
+
+      try {
+        const targets: Array<{ key: string; link: string }> = [];
+        for (const [key, p] of savedProfilesMap.entries()) {
+          if (p.link && this.needsDescriptionBackfill(p)) {
+            targets.push({ key, link: p.link });
+            if (targets.length >= limit) break;
+          }
+        }
+
+        if (targets.length === 0) {
+          this.isEnriching = false;
+          return;
+        }
+
+        this.log(`Începem extragerea descrierilor reale complete pentru ${targets.length} anunțuri existente...`, "info");
+        let enriched = 0;
+        let removedExcluded = 0;
+
+        for (let i = 0; i < targets.length; i++) {
+          const { key, link } = targets[i];
+          const existing = savedProfilesMap.get(key);
+          if (!existing || !this.needsDescriptionBackfill(existing)) continue;
+
+          // Polite anti-block delay between detail requests (600ms - 1000ms)
+          await new Promise(r => setTimeout(r, 600 + Math.floor(Math.random() * 400)));
+
+          try {
+            const detail = await bursaplacerilor.fetchListingDetailDirect(link);
+            if (detail) {
+              let changed = false;
+              if (detail.title && (!existing.title || existing.title === "Anunț" || existing.title.endsWith("...") || existing.title.endsWith("…") || detail.title.length > existing.title.length)) {
+                existing.title = detail.title;
+                changed = true;
+              }
+              if (detail.desc && !isGenericOrEmptyDescription(detail.desc)) {
+                existing.description = detail.desc;
+                changed = true;
+              }
+              if (detail.images && detail.images.length > 0 && (!existing.images || existing.images.length < detail.images.length)) {
+                existing.images = detail.images;
+                existing.image = detail.images[0];
+                changed = true;
+              }
+              if (detail.location && (!existing.location || existing.location === "România" || (!existing.location.includes("Sector") && detail.location.includes("Sector")))) {
+                existing.location = detail.location;
+                changed = true;
+              }
+
+              // Re-check exclusion now that we have the full real description
+              if (isExcludedListing(existing)) {
+                savedProfilesMap.delete(key);
+                removedExcluded++;
+                continue;
+              }
+
+              if (changed) {
+                existing.lastCheckedStatus = "Descriere completă (.anunt-desc)";
+                enriched++;
+              } else {
+                existing.lastCheckedStatus = "Descriere completă (.anunt-desc)";
+              }
+            }
+          } catch {}
+
+          if ((i + 1) % 10 === 0) {
+            persistSavedProfiles();
+          }
+        }
+
+        persistSavedProfiles();
+        this.persistState();
+        this.log(`Extragere descrieri finalizată: ${enriched} descrieri reale salvate${removedExcluded > 0 ? `, ${removedExcluded} anunțuri excluse eliminate` : ''}.`, "success");
+      } catch (err: any) {
+        this.log(`Eroare la extragerea descrierilor reale: ${err.message}`, "warn");
+      } finally {
+        this.isEnriching = false;
+      }
+    }
+
+    private loadState(): BursaCrawlerState {
+      try {
+        if (fs.existsSync(CRAWLER_STATE_FILE)) {
+          const raw = fs.readFileSync(CRAWLER_STATE_FILE, "utf-8");
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.enabled === "boolean") {
+            if (parsed.status === "running") {
+              parsed.status = "idle";
+              parsed.currentStatusMessage = "Scanare pregătită pentru reluare.";
+            }
+            if (!parsed.maxPages || parsed.maxPages < 400) {
+              parsed.maxPages = 400;
+            }
+            return parsed;
+          }
+        }
+      } catch (err: any) {
+        console.warn("[CRAWLER] Error reading state file:", err.message);
+      }
+
+      return {
+        enabled: true,
+        status: "idle",
+        lastRunStarted: null,
+        lastRunFinished: null,
+        nextRunScheduled: Date.now() + 60 * 1000,
+        currentPage: 1,
+        maxPages: 400,
+        stats: {
+          totalPagesScanned: 0,
+          totalAdsFound: 0,
+          adsAdded: 0,
+          adsUpdated: 0,
+          adsExcluded: 0
+        },
+        currentStatusMessage: "Programat pentru scanare săptămânală automată (la fiecare 7 zile).",
+        logs: [
+          {
+            timestamp: Date.now(),
+            message: "Crawler inițializat: Scanare automată săptămânală activată (la 7 zile, max 5.000 anunțuri, fără trans/ts).",
+            type: "info"
+          }
+        ]
+      };
+    }
+
+    public persistState() {
+      try {
+        fs.writeFileSync(CRAWLER_STATE_FILE, JSON.stringify(this.state, null, 2), "utf-8");
+      } catch (err: any) {
+        console.warn("[CRAWLER] Error persisting crawler state:", err.message);
+      }
+    }
+
+    public log(message: string, type: "info" | "warn" | "error" | "success" = "info") {
+      const entry: CrawlerLogEntry = {
+        timestamp: Date.now(),
+        message,
+        type
+      };
+      this.state.logs.unshift(entry);
+      if (this.state.logs.length > 80) {
+        this.state.logs = this.state.logs.slice(0, 80);
+      }
+      console.log(`[CRAWLER] [${type.toUpperCase()}] ${message}`);
+    }
+
+    private initScheduler() {
+      if (this.timerInterval) clearInterval(this.timerInterval);
+      this.timerInterval = setInterval(() => {
+        if (!this.state.enabled) return;
+        if (this.isRunning) return;
+
+        const now = Date.now();
+        if (now >= this.state.nextRunScheduled) {
+          this.log("Declanșare automată programată la 7 zile...", "info");
+          this.startCrawl(false);
+        }
+      }, 30 * 1000);
+    }
+
+    public getState() {
+      return {
+        ...this.state,
+        isRunning: this.isRunning,
+        isPaused: this.isPaused,
+        isEnriching: this.isEnriching,
+        missingDescriptionsCount: this.getMissingDescriptionsCount(),
+        databaseCapacity: {
+          current: savedProfilesMap.size,
+          max: MAX_DATABASE_PROFILES,
+          percent: Math.min(100, Number(((savedProfilesMap.size / MAX_DATABASE_PROFILES) * 100).toFixed(1)))
+        }
+      };
+    }
+
+    public toggleEnabled(): boolean {
+      this.state.enabled = !this.state.enabled;
+      if (!this.state.enabled) {
+        this.state.status = "idle";
+        this.state.currentStatusMessage = "Scanare automată dezactivată manual.";
+        this.log("Scanarea automată săptămânală a fost dezactivată manual de utilizator.", "warn");
+      } else {
+        if (!this.state.nextRunScheduled || this.state.nextRunScheduled < Date.now()) {
+          this.state.nextRunScheduled = Date.now() + 60 * 1000;
+        }
+        this.state.currentStatusMessage = "Scanare automată reactivată. Programată periodic la 7 zile.";
+        this.log("Scanarea automată săptămânală a fost reactivată.", "success");
+      }
+      this.persistState();
+      return this.state.enabled;
+    }
+
+    public pause(): boolean {
+      if (!this.isRunning) return false;
+      this.isPaused = true;
+      this.state.status = "paused";
+      this.state.currentStatusMessage = "Scanare pusă pe pauză la cererea utilizatorului.";
+      this.log("Scanarea a fost pusă pe pauză.", "warn");
+      this.persistState();
+      return true;
+    }
+
+    public resume(): boolean {
+      if (this.isRunning && this.isPaused) {
+        this.isPaused = false;
+        this.state.status = "running";
+        this.state.currentStatusMessage = `Scanare reluată de la pagina ${this.state.currentPage}...`;
+        this.log("Scanarea a fost reluată din pauză.", "info");
+        this.persistState();
+        return true;
+      }
+      if (!this.isRunning) {
+        this.startCrawl(true);
+        return true;
+      }
+      return false;
+    }
+
+    public clearLogs() {
+      this.state.logs = [
+        {
+          timestamp: Date.now(),
+          message: "Jurnal de activitate resetat.",
+          type: "info"
+        }
+      ];
+      this.persistState();
+    }
+
+    public async startCrawl(isManual = false) {
+      if (this.isRunning) {
+        this.log("Scanarea este deja în derulare.", "warn");
+        return;
+      }
+
+      this.isRunning = true;
+      this.isPaused = false;
+      this.state.status = "running";
+      this.state.lastRunStarted = Date.now();
+
+      const maxPages = this.state.maxPages || 400;
+      // Resume from current page or restart from 1 if cycle was completed
+      if (!this.state.currentPage || this.state.currentPage >= maxPages) {
+        this.state.currentPage = 1;
+        this.state.stats = {
+          totalPagesScanned: 0,
+          totalAdsFound: 0,
+          adsAdded: 0,
+          adsUpdated: 0,
+          adsExcluded: 0
+        };
+      }
+
+      const startMsg = isManual
+        ? `A fost pornită scanarea manuală a site-ului Bursa Plăcerilor (de la pagina ${this.state.currentPage}/${maxPages})...`
+        : `A început scanarea automată programată la 7 zile (Bursa Plăcerilor, de la pagina ${this.state.currentPage}/${maxPages})...`;
+      this.log(startMsg, "info");
+      this.state.currentStatusMessage = `Scanare în curs: Pagina ${this.state.currentPage} din ${maxPages} (Anti-Block activ)...`;
+      this.persistState();
+
+      (async () => {
+        try {
+          let emptyPagesCount = 0;
+          const startPage = this.state.currentPage || 1;
+
+          for (let page = startPage; page <= maxPages; page++) {
+            if (this.isPaused) {
+              this.log(`Scanarea a fost oprită temporar la pagina ${page}.`, "warn");
+              this.state.status = "paused";
+              this.persistState();
+              this.isRunning = false;
+              return;
+            }
+
+            if (savedProfilesMap.size >= MAX_DATABASE_PROFILES) {
+              this.log(`Baza de date a atins capacitatea maximă de ${MAX_DATABASE_PROFILES} anunțuri. Finalizare ciclu scanare.`, "success");
+              break;
+            }
+
+            this.state.currentPage = page;
+            this.state.currentStatusMessage = `Scanare pagina ${page} din ${maxPages} (Spațiere 2.2s - 3.5s anti-block)...`;
+
+            // Spaced crawl delay between pages (2.2s - 3.5s) to prevent IP rate-limiting
+            const pageDelay = 2200 + Math.floor(Math.random() * 1300);
+            await new Promise(r => setTimeout(r, pageDelay));
+
+            let pageResult;
+            try {
+              pageResult = await bursaplacerilor.fetchSingleRemotePage("", "", page);
+            } catch (err: any) {
+              this.log(`Eroare temporară la descărcarea paginii ${page}: ${err.message}. Pauză de protecție 20s...`, "warn");
+              await new Promise(r => setTimeout(r, 20000));
+              try {
+                pageResult = await bursaplacerilor.fetchSingleRemotePage("", "", page);
+              } catch (retryErr: any) {
+                this.log(`Eșec reîncercare pagina ${page}: ${retryErr.message}. Trecem la pagina următoare.`, "error");
+                continue;
+              }
+            }
+
+            if (!pageResult || !pageResult.cards || pageResult.cards.length === 0) {
+              emptyPagesCount++;
+              if (emptyPagesCount >= 3) {
+                this.log(`S-a ajuns la finalul listărilor Bursa Plăcerilor (3 pagini consecutive goale la pagina ${page}).`, "info");
+                break;
+              }
+              continue;
+            } else {
+              emptyPagesCount = 0;
+            }
+
+            this.state.stats.totalPagesScanned++;
+            this.state.stats.totalAdsFound += pageResult.cards.length;
+
+            let pageAdded = 0;
+            let pageUpdated = 0;
+            let pageExcluded = 0;
+            const profilesToEnrich: Array<{ key: string; link: string }> = [];
+
+            for (const card of pageResult.cards) {
+              // 1. Strict Exclusion: reject all trans, ts, transexuala, trasexuala, pentru femei / doamne
+              if (isExcludedListing(card)) {
+                this.state.stats.adsExcluded++;
+                pageExcluded++;
+                continue;
+              }
+
+              // 2. Strict Single Phone Policy
+              const cleanPhone = getNormalizedPhone(card);
+
+              if (cleanPhone) {
+                let existingKey: string | null = null;
+                for (const [k, p] of savedProfilesMap.entries()) {
+                  if (getNormalizedPhone(p) === cleanPhone) {
+                    existingKey = k;
+                    break;
+                  }
+                }
+
+                if (existingKey) {
+                  // Existing profile with this phone: update details without creating duplicate
+                  const existing = savedProfilesMap.get(existingKey)!;
+                  existing.lastUpdatedAt = Date.now();
+                  existing.status = "active";
+                  if (card.location && (!existing.location || existing.location === "România" || (!existing.location.includes("Sector") && card.location.includes("Sector")))) {
+                    existing.location = card.location;
+                  }
+                  if (card.image && (!existing.images || existing.images.length === 0)) {
+                    existing.image = card.image;
+                    existing.images = [card.image];
+                  }
+                  if (card.link && isGenericOrEmptyDescription(existing.description)) {
+                    profilesToEnrich.push({ key: existingKey, link: card.link });
+                  }
+                  this.state.stats.adsUpdated++;
+                  pageUpdated++;
+                  continue;
+                }
+              }
+
+              // 3. New ad - ensure we don't exceed MAX_DATABASE_PROFILES (5000)
+              if (savedProfilesMap.size >= MAX_DATABASE_PROFILES) {
+                continue;
+              }
+
+              const now = Date.now();
+              const profileId = card.id || `bp-${cleanPhone || ''}-${now}`;
+              const key = normalizeLink(card.link) || String(profileId);
+
+              if (savedProfilesMap.has(key)) {
+                const existing = savedProfilesMap.get(key)!;
+                existing.lastUpdatedAt = now;
+                existing.status = "active";
+                if (card.link && isGenericOrEmptyDescription(existing.description)) {
+                  profilesToEnrich.push({ key, link: card.link });
+                }
+                this.state.stats.adsUpdated++;
+                pageUpdated++;
+                continue;
+              }
+
+              const newProfile: SavedProfile = {
+                id: profileId,
+                adId: card.adId || profileId,
+                title: card.title || "Anunț Bursa Plăcerilor",
+                link: card.link,
+                image: card.image || "",
+                images: card.images && card.images.length > 0 ? card.images : (card.image ? [card.image] : []),
+                location: card.location || "România",
+                category: card.category || "",
+                date: card.date || "Recent",
+                description: card.description || `Anunț publicat pe BursaPlacerilor.com${cleanPhone ? ' • Tel: ' + cleanPhone : ''}`,
+                price: card.price || "N/A",
+                phoneNumber: card.phoneNumber || card.revealedPhone || cleanPhone || "",
+                revealedPhone: card.revealedPhone || card.phoneNumber || cleanPhone || undefined,
+                source: "bursaplacerilor",
+                savedAt: now,
+                lastUpdatedAt: now,
+                status: "active",
+                lastCheckedStatus: "Verificat BursaPlacerilor Auto-Scan"
+              };
+
+              savedProfilesMap.set(key, newProfile);
+              if (card.link && isGenericOrEmptyDescription(newProfile.description)) {
+                profilesToEnrich.push({ key, link: card.link });
+              }
+              this.state.stats.adsAdded++;
+              pageAdded++;
+            }
+
+            // Enrich real descriptions, full gallery & exact location for cards on this page
+            for (const target of profilesToEnrich) {
+              if (this.isPaused) break;
+              try {
+                await new Promise(r => setTimeout(r, 550 + Math.floor(Math.random() * 400)));
+                const detail = await bursaplacerilor.fetchListingDetailDirect(target.link);
+                const stored = savedProfilesMap.get(target.key);
+                if (detail && stored) {
+                  if (detail.title && (!stored.title || stored.title === "Anunț" || stored.title.endsWith("...") || stored.title.endsWith("…") || detail.title.length > stored.title.length)) {
+                    stored.title = detail.title;
+                  }
+                  if (detail.desc && !isGenericOrEmptyDescription(detail.desc)) {
+                    stored.description = detail.desc;
+                    if (isExcludedListing(stored)) {
+                      savedProfilesMap.delete(target.key);
+                      this.state.stats.adsExcluded++;
+                      pageExcluded++;
+                      this.state.stats.adsAdded = Math.max(0, this.state.stats.adsAdded - 1);
+                      pageAdded = Math.max(0, pageAdded - 1);
+                      continue;
+                    }
+                  }
+                  if (detail.images && detail.images.length > 0) {
+                    stored.images = detail.images;
+                    stored.image = detail.images[0];
+                  }
+                  if (detail.location && (!stored.location || stored.location === "România" || (!stored.location.includes("Sector") && detail.location.includes("Sector")))) {
+                    stored.location = detail.location;
+                  }
+                  if (detail.date) stored.date = detail.date;
+                }
+              } catch {}
+            }
+
+            persistSavedProfiles();
+            this.persistState();
+
+            this.log(`Pagina ${page}/${maxPages}: +${pageAdded} noi, ${pageUpdated} actualizate, ${pageExcluded} excluse (trans/femei). Total în DB: ${savedProfilesMap.size}/${MAX_DATABASE_PROFILES}.`, "info");
+          }
+
+          this.state.status = "idle";
+          this.state.lastRunFinished = Date.now();
+          this.state.nextRunScheduled = Date.now() + CRAWLER_WEEK_MS; // Exactly 7 days from now
+          this.state.currentStatusMessage = `Scanare finalizată. DB are ${savedProfilesMap.size}/${MAX_DATABASE_PROFILES} anunțuri. Următoarea scanare: ${new Date(this.state.nextRunScheduled).toLocaleDateString('ro-RO')}.`;
+          this.log(`Scanare finalizată cu succes! Adăugate: ${this.state.stats.adsAdded}, Actualizate: ${this.state.stats.adsUpdated}, Excluse: ${this.state.stats.adsExcluded}. Următoarea rulare automată este programată peste 7 zile.`, "success");
+        } catch (err: any) {
+          this.log(`Eroare în timpul scanării: ${err.message}`, "error");
+          this.state.status = "idle";
+          this.state.currentStatusMessage = `Eroare: ${err.message}`;
+        } finally {
+          this.isRunning = false;
+          this.isPaused = false;
+          persistSavedProfiles();
+          this.persistState();
+        }
+      })();
+    }
+  }
+
+  const bursaWeeklyCrawler = new BursaWeeklyCrawler();
+
+  // ------------------------------------------
+  // BURSA CRAWLER API ENDPOINTS
+  // ------------------------------------------
+  app.get("/api/crawler/status", (req, res) => {
+    try {
+      res.json(bursaWeeklyCrawler.getState());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/crawler/start", (req, res) => {
+    try {
+      bursaWeeklyCrawler.startCrawl(true);
+      res.json({ success: true, message: "Scanare pornită", state: bursaWeeklyCrawler.getState() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/crawler/pause", (req, res) => {
+    try {
+      const paused = bursaWeeklyCrawler.pause();
+      res.json({ success: true, paused, state: bursaWeeklyCrawler.getState() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/crawler/resume", (req, res) => {
+    try {
+      const resumed = bursaWeeklyCrawler.resume();
+      res.json({ success: true, resumed, state: bursaWeeklyCrawler.getState() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/crawler/toggle", (req, res) => {
+    try {
+      const enabled = bursaWeeklyCrawler.toggleEnabled();
+      res.json({ success: true, enabled, state: bursaWeeklyCrawler.getState() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/crawler/clear-logs", (req, res) => {
+    try {
+      bursaWeeklyCrawler.clearLogs();
+      res.json({ success: true, message: "Jurnal curățat", state: bursaWeeklyCrawler.getState() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/crawler/enrich-descriptions", (req, res) => {
+    try {
+      bursaWeeklyCrawler.enrichMissingDescriptions();
+      res.json({ success: true, message: "Extragerea descrierilor reale a pornit în fundal.", state: bursaWeeklyCrawler.getState() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -4055,7 +5237,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -4072,9 +5254,27 @@ async function startServer() {
     console.log(`[SERVER] SUCCESS: Server running on http://localhost:${PORT}`);
   });
 
-  server.on('error', (err) => {
+  server.on('error', (err: any) => {
     console.error("[SERVER] Listener error:", err);
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`[SERVER] Fatal: Port ${PORT} already in use. Exiting to allow supervisor restart...`);
+      process.exit(1);
+    }
   });
+
+  const onShutdown = () => {
+    console.log("[SERVER] Received shutdown signal, closing server...");
+    server.close(() => {
+      console.log("[SERVER] Server closed cleanly.");
+      process.exit(0);
+    });
+    setTimeout(() => {
+      process.exit(0);
+    }, 1500).unref();
+  };
+
+  process.once('SIGTERM', onShutdown);
+  process.once('SIGINT', onShutdown);
   } catch (err) {
     console.error("[SERVER] Error during startServer execution:", err);
     throw err;
