@@ -36,9 +36,6 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Bypass SSL certificate verification globally to handle 526 errors
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 const jar = new CookieJar();
 
 const client = wrapper(axios.create({ 
@@ -50,7 +47,6 @@ console.log("[SERVER] Axios client with cookie jar initialized.");
 const ipv4HttpsAgent = new https.Agent({
   family: 4,
   keepAlive: true,
-  rejectUnauthorized: false
 });
 
 // Create a base client
@@ -4718,16 +4714,21 @@ async function startServer() {
   // VERSIONED BURSA v1 OBSERVATION STORE, SCRAPER & APPROAPE API
   // ------------------------------------------
   const bursaV1Store = new BursaV1Store(PROFILES_DIR);
+  if (bursaV1Store.getListingsCount() === 0 && savedProfilesMap.size > 0) {
+    const seededCount = bursaV1Store.seedFromLegacyProfiles(Array.from(savedProfilesMap.values()));
+    if (seededCount > 0) {
+      console.log(`[BURSA_V1_STORE] Seeded ${seededCount} archived Bursa listings from saved_profiles.json.`);
+    }
+  }
   const bursaV1Scraper = new BursaScraperService({ store: bursaV1Store });
 
   if (process.env.BURSA_SCHEDULER_ENABLED !== "false") {
-    const hasPriorRuns = bursaV1Store.getLatestRuns(1).length > 0;
-    const runOnBoot = process.env.BURSA_RUN_ON_STARTUP === "true" || !hasPriorRuns;
+    const runOnBoot = process.env.BURSA_RUN_ON_STARTUP === "true";
     bursaV1Scraper.startScheduler(runOnBoot);
   }
 
   app.use(
-    "/api/v1/bursa",
+    ["/api/v1/bursa", "/api/bursa"],
     createBursaV1Router({
       store: bursaV1Store,
       scraper: bursaV1Scraper,

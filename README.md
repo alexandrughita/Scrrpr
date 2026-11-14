@@ -65,7 +65,7 @@ The Bursa v1 store persists three atomically updated JSON files inside `data/`:
 
 ## Scraping Schedule
 
-By default (`BURSA_SCHEDULER_ENABLED !== "false"`), `BursaScraperService` schedules an automated weekly discovery sweep every `604800000` ms (7 days), configurable via `BURSA_SCRAPE_INTERVAL_MS`. If no prior `v1` run exists on startup, an initial non-blocking sweep runs automatically. Concurrency locking prevents overlapping runs from spawning duplicate jobs.
+By default (`BURSA_SCHEDULER_ENABLED !== "false"`), `BursaScraperService` schedules an automated weekly discovery sweep every `604800000` ms (7 days), configurable via `BURSA_SCRAPE_INTERVAL_MS`. Startup runs are strictly opt-in via `BURSA_RUN_ON_STARTUP=true` (when `false` or unset, the server waits for the scheduled interval or manual sweep). Concurrency locking prevents overlapping runs from spawning duplicate jobs.
 
 ---
 
@@ -81,8 +81,8 @@ All `/api/v1/bursa/*` routes require one of:
 Unauthenticated or mismatched requests receive `401 UNAUTHORIZED` (`503 AUTH_NOT_CONFIGURED` if no key is configured).
 
 ### Endpoints
-- `GET /api/v1/bursa/listings` — Paginated listings with embedded change history. Supports `page`, `per_page` (1–100), `updated_since`, `status`, `city`, `county`, `source_listing_id`.
-- `GET /api/v1/bursa/listings/:id` — Single listing lookup by internal `id` or `source_listing_id`.
+- `GET /api/v1/bursa/listings` (alias `/api/v1/bursa/ads`) — Paginated listings with embedded change history. Supports `page`, `per_page` (1–100), `updated_since`, `status`, `city`, `county`, `source_listing_id`.
+- `GET /api/v1/bursa/listings/:id` (alias `/api/v1/bursa/ads/:id`) — Single listing lookup by internal `id` or `source_listing_id`.
 - `GET /api/v1/bursa/changes` — Paginated append-only change feed. Supports `page`, `per_page`, `updated_since`, `field`, `status`, `city`, `county`, `source_listing_id`.
 - `GET /api/v1/bursa/health` — Scraper operational status, schedule timestamps, last run outcome, and aggregate counts (never exposes phone numbers or credentials).
 

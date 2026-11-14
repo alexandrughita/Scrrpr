@@ -19,7 +19,11 @@ import {
 } from "./types";
 import {
   deriveInternalRecordId,
+  deriveStableSourceListingId,
+  extractStructuredLocation,
+  isBursaExcludedListing,
   normalizeCanonicalUrl,
+  normalizeContact,
   sanitizeErrorMessage,
   stripDiacritics,
 } from "./parser";
@@ -425,6 +429,34 @@ export class BursaV1Store {
     extractedListings: ExtractedBursaListing[],
     meta: BursaSweepMeta
   ): BursaRunRecord {
+    const errorSummary = meta.errorSummary ? sanitizeErrorMessage(meta.errorSummary) : null;
+
+    // Critical failure-safety guarantee: failed or incomplete sweeps MUST NEVER create, update,
+    // reactivate, or deactivate any listing records or emit change events.
+    if (meta.failed || !meta.sweepCompleted) {
+      const failedRun: BursaRunRecord = {
+        run_id: meta.runId,
+        started_at: meta.startedAt,
+        finished_at: meta.finishedAt,
+        outcome: "failed",
+        sweep_completed: false,
+        pages_scanned: meta.pagesScanned,
+        listings_discovered: 0,
+        new_count: 0,
+        changed_count: 0,
+        unchanged_count: 0,
+        inactivated_count: 0,
+        removed_count: 0,
+        error_summary: errorSummary || "Discovery sweep failed or did not complete",
+      };
+      this.runs.push(failedRun);
+      if (this.runs.length > this.maxRunsHistory) {
+        this.runs = this.runs.slice(-this.maxRunsHistory);
+      }
+      this.atomicWriteJson(this.runsFile, this.runs);
+      return failedRun;
+    }
+
     const seenInternalIds = new Set<string>();
     let newCount = 0;
     let changedCount = 0;
@@ -442,15 +474,13 @@ export class BursaV1Store {
     }
 
     let runOutcome: BursaRunOutcome;
-    let errorSummary = meta.errorSummary ? sanitizeErrorMessage(meta.errorSummary) : null;
+    let finalErrorSummary = errorSummary;
 
-    if (meta.failed || !meta.sweepCompleted) {
-      runOutcome = "failed";
-    } else if (seenInternalIds.size === 0) {
+    if (seenInternalIds.size === 0) {
       // Successful sweep with zero results: DO NOT deactivate anything; flag for investigation.
       runOutcome = "success_zero_results";
-      if (!errorSummary) {
-        errorSummary = "Successful discovery sweep returned zero results; active listings preserved pending investigation";
+      if (!finalErrorSummary) {
+        finalErrorSummary = "Successful discovery sweep returned zero results; active listings preserved pending investigation";
       }
     } else {
       runOutcome = "success";
@@ -486,7 +516,7 @@ export class BursaV1Store {
       unchanged_count: unchangedCount,
       inactivated_count: inactivatedCount,
       removed_count: removedCount,
-      error_summary: errorSummary,
+      error_summary: finalErrorSummary,
     };
 
     this.runs.push(runRecord);
@@ -496,6 +526,111 @@ export class BursaV1Store {
 
     this.persistAll();
     return runRecord;
+  }
+
+  public getListingsCount(): number {
+    return this.listingsById.size;
+  }
+
+  public seedFromLegacyProfiles(
+    legacyProfiles: Array<{
+      source?: string;
+      link?: string;
+      title?: string;
+      description?: string;
+      location?: string;
+      images?: string[];
+      phoneNumber?: string;
+      revealedPhone?: string;
+      savedAt?: number;
+      lastUpdatedAt?: number;
+      status?: string;
+      locationHistory?: Array<{ location: string; date?: number }>;
+    }>
+  ): number {
+    if (this.listingsById.size > 0 || !Array.isArray(legacyProfiles) || legacyProfiles.length === 0) {
+      return 0;
+    }
+
+    let imported = 0;
+    for (const item of legacyProfiles) {
+      if (!item || item.source !== "bursaplacerilor" || !item.link) continue;
+      const canonicalUrl = normalizeCanonicalUrl(item.link);
+      if (!canonicalUrl) continue;
+      if (
+        isBursaExcludedListing({
+          title: item.title,
+          description: item.description,
+          source_url: canonicalUrl,
+          location_raw: item.location,
+        })
+      ) {
+        continue;
+      }
+
+      const sourceListingId = deriveStableSourceListingId(canonicalUrl, item.images || []);
+      if (this.idBySourceListingId.has(sourceListingId) || this.idByCanonicalUrl.has(canonicalUrl)) {
+        continue;
+      }
+
+      const internalId = deriveInternalRecordId(sourceListingId);
+      const savedMs = typeof item.savedAt === "number" && item.savedAt > 0 ? item.savedAt : Date.now();
+      const updatedMs =
+        typeof item.lastUpdatedAt === "number" && item.lastUpdatedAt >= savedMs ? item.lastUpdatedAt : savedMs;
+      const firstSeenIso = new Date(savedMs).toISOString();
+      const lastUpdatedIso = new Date(updatedMs).toISOString();
+
+      const structuredLocation = extractStructuredLocation(
+        item.location ?? null,
+        canonicalUrl,
+        item.title ?? null,
+        item.description || ""
+      );
+
+      const rawPhone = item.revealedPhone || item.phoneNumber || null;
+      const cleanedPhone = rawPhone && !/click/i.test(rawPhone) ? rawPhone : null;
+      const status: BursaListingStatus = item.status === "expired" ? "removed" : "active";
+
+      const record: BursaListingRecord = {
+        id: internalId,
+        source_listing_id: sourceListingId,
+        source_url: canonicalUrl,
+        title: item.title ? item.title.replace(/\s+/g, " ").trim() : null,
+        description: item.description !== undefined ? item.description : null,
+        location: structuredLocation,
+        contact: normalizeContact(cleanedPhone),
+        published_at: null,
+        updated_at: null,
+        status,
+        first_seen_at: firstSeenIso,
+        last_seen_at: status === "removed" ? null : lastUpdatedIso,
+        last_checked_at: lastUpdatedIso,
+        last_updated_at: lastUpdatedIso,
+      };
+
+      this.listingsById.set(record.id, record);
+      this.idBySourceListingId.set(record.source_listing_id, record.id);
+      this.idByCanonicalUrl.set(canonicalUrl, record.id);
+      imported++;
+
+      if (Array.isArray(item.locationHistory) && item.locationHistory.length > 1) {
+        for (let i = 1; i < item.locationHistory.length; i++) {
+          const prev = item.locationHistory[i - 1];
+          const curr = item.locationHistory[i];
+          if (!prev?.location || !curr?.location || prev.location === curr.location) continue;
+          const prevLoc = extractStructuredLocation(prev.location, canonicalUrl, item.title ?? null);
+          const newLoc = extractStructuredLocation(curr.location, canonicalUrl, item.title ?? null);
+          const detectedAt =
+            typeof curr.date === "number" && curr.date > 0 ? new Date(curr.date).toISOString() : lastUpdatedIso;
+          this.changes.push(this.createChangeEvent(record, "location", prevLoc, newLoc, detectedAt));
+        }
+      }
+    }
+
+    if (imported > 0) {
+      this.persistAll();
+    }
+    return imported;
   }
 
   public recordDetailCheck(extracted: ExtractedBursaListing, checkedAt: string): BursaListingRecord {

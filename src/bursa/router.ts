@@ -137,8 +137,8 @@ export function createBursaV1Router(options: BursaRouterOptions): express.Router
     next();
   });
 
-  // GET /api/v1/bursa/listings
-  router.get("/listings", (req, res) => {
+  // GET /api/v1/bursa/listings (and /ads alias)
+  router.get(["/listings", "/ads"], (req, res) => {
     try {
       const pagination = parsePaginationParams(req.query);
       if ("error" in pagination) {
@@ -186,8 +186,8 @@ export function createBursaV1Router(options: BursaRouterOptions): express.Router
     }
   });
 
-  // GET /api/v1/bursa/listings/:id
-  router.get("/listings/:id", (req, res) => {
+  // GET /api/v1/bursa/listings/:id (and /ads/:id alias)
+  router.get(["/listings/:id", "/ads/:id"], (req, res) => {
     try {
       const listing = options.store.getListingById(req.params.id);
       if (!listing) {
@@ -283,6 +283,13 @@ export function createBursaV1Router(options: BursaRouterOptions): express.Router
         .status(500)
         .json(makeErrorEnvelope("INTERNAL_ERROR", sanitizeErrorMessage(err)));
     }
+  });
+
+  // Structured v1 404 for unknown endpoints under /api/v1/bursa/*
+  router.use((req, res) => {
+    return res
+      .status(404)
+      .json(makeErrorEnvelope("NOT_FOUND", `Endpoint not found: ${req.originalUrl}`));
   });
 
   return router;

@@ -710,6 +710,141 @@ describe("Bursa v1 Scraper, Store, and Approape API", () => {
       assert.equal(healthJson.data.totals.active, 1);
       assert.equal(healthJson.data.totals.inactive, 1);
       assert.equal(healthJson.data.last_run_outcome, "success");
+
+      // /ads alias returns same v1 payload without 404
+      const adsAliasRes = await fetch(`${baseUrl}/api/v1/bursa/ads?city=Timisoara`, {
+        headers: { Authorization: "Bearer test-secret-api-key-999" },
+      });
+      assert.equal(adsAliasRes.status, 200);
+      const adsAliasJson = await adsAliasRes.json();
+      assert.equal(adsAliasJson.data[0].source_listing_id, "30001");
+
+      // Unknown subpath under /api/v1/bursa/* returns structured v1 404 envelope
+      const unknownSubpathRes = await fetch(`${baseUrl}/api/v1/bursa/nonexistent`, {
+        headers: { Authorization: "Bearer test-secret-api-key-999" },
+      });
+      assert.equal(unknownSubpathRes.status, 404);
+      const unknownSubpathJson = await unknownSubpathRes.json();
+      assert.equal(unknownSubpathJson.source, "bursa");
+      assert.equal(unknownSubpathJson.schema_version, "1.0");
+      assert.equal(unknownSubpathJson.error.code, "NOT_FOUND");
     });
   });
+
+  it("12. prevents partial failed discovery sweeps from updating, reactivating, or creating listing records", async () => {
+    const store = new BursaV1Store(tmpDir);
+
+    // Seed an inactive listing (90001) via sweep 1 then sweep 2 without 90001
+    store.recordDiscoverySweep(
+      [
+        {
+          source_listing_id: "90001",
+          source_url: "https://bursaplacerilor.com/arad/ada/",
+          title: "Ada Original Title",
+          description: "Initial description",
+          location: { city: "Arad", county: "Arad", raw: "Arad" },
+          contact: { phone: "0729000001", normalized_phone: "0729000001" },
+          published_at: null,
+          updated_at: null,
+          status: "active",
+        },
+        {
+          source_listing_id: "90002",
+          source_url: "https://bursaplacerilor.com/timis/lara/",
+          title: "Lara Active",
+          description: null,
+          location: { city: "Timisoara", county: "Timis", raw: "Timisoara, Timis" },
+          contact: { phone: "0729000002", normalized_phone: "0729000002" },
+          published_at: null,
+          updated_at: null,
+          status: "active",
+        },
+      ],
+      {
+        runId: "run_seed_1",
+        startedAt: "2026-11-01T10:00:00.000Z",
+        finishedAt: "2026-11-01T10:01:00.000Z",
+        pagesScanned: 1,
+        sweepCompleted: true,
+        failed: false,
+        errorSummary: null,
+      }
+    );
+
+    store.recordDiscoverySweep(
+      [
+        {
+          source_listing_id: "90002",
+          source_url: "https://bursaplacerilor.com/timis/lara/",
+          title: "Lara Active",
+          description: null,
+          location: { city: "Timisoara", county: "Timis", raw: "Timisoara, Timis" },
+          contact: { phone: "0729000002", normalized_phone: "0729000002" },
+          published_at: null,
+          updated_at: null,
+          status: "active",
+        },
+      ],
+      {
+        runId: "run_seed_2",
+        startedAt: "2026-11-08T10:00:00.000Z",
+        finishedAt: "2026-11-08T10:01:00.000Z",
+        pagesScanned: 1,
+        sweepCompleted: true,
+        failed: false,
+        errorSummary: null,
+      }
+    );
+
+    assert.equal(store.getListingById("90001")?.status, "inactive");
+    const baselineUpdatedAt = store.getListingById("90001")!.last_updated_at;
+    const baselineChangesTotal = store.queryChanges({ page: 1, per_page: 50 }).pagination.total;
+
+    // Multi-page partial failure: page 1 returns a changed/reactivated 90001 + brand new 90003,
+    // while page 2 fails with HTTP 500
+    const page1Html = wrapPageHtml(
+      makeCardHtml({
+        href: "/cluj/ada/",
+        title: "Ada Mutated On Partial Sweep",
+        meta: "Cluj-Napoca, Cluj · Escorte",
+        phone: "0729000001",
+        imgSrc: "/uploads/cluj/90001_0.webp",
+      }) +
+        makeCardHtml({
+          href: "/cluj/new-item/",
+          title: "Brand New On Partial Sweep",
+          meta: "Cluj-Napoca, Cluj · Escorte",
+          phone: "0729000003",
+          imgSrc: "/uploads/cluj/90003_0.webp",
+        }),
+      `<div class="pagination"><a href="/?pagina=2">2</a></div>`
+    );
+
+    const partialFailScraper = new BursaScraperService({
+      store,
+      sleep: async () => {},
+      httpGet: async (url) => {
+        if (url.endsWith("/robots.txt")) return { status: 404, data: "" };
+        if (url.includes("pagina=2")) return { status: 500, data: "Upstream failure" };
+        return { status: 200, data: page1Html };
+      },
+      config: { baseUrl: "https://bursaplacerilor.com", pageDelayMs: 0, maxRetries: 0 },
+    });
+
+    const partialRun = await partialFailScraper.runDiscoverySweep();
+    assert.equal(partialRun.run?.outcome, "failed");
+    assert.equal(partialRun.run?.sweep_completed, false);
+    assert.equal(partialRun.run?.new_count, 0);
+    assert.equal(partialRun.run?.changed_count, 0);
+
+    // 90001 MUST remain inactive with original title, location, and timestamp; 90003 MUST NOT exist
+    const afterPartial = store.getListingById("90001")!;
+    assert.equal(afterPartial.status, "inactive");
+    assert.equal(afterPartial.title, "Ada Original Title");
+    assert.equal(afterPartial.location.city, "Arad");
+    assert.equal(afterPartial.last_updated_at, baselineUpdatedAt);
+    assert.equal(store.getListingById("90003"), null);
+    assert.equal(store.queryChanges({ page: 1, per_page: 50 }).pagination.total, baselineChangesTotal);
+  });
 });
+

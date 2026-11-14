@@ -58,7 +58,7 @@ Scrrprr resolves the expected secret from `process.env.BURSA_API_KEY`, falling b
 | `"removed"` | Confirmed HTTP `404` / `410` or explicit upstream removal/expiration notice on the listing page. |
 | `"unknown"` | Indeterminate observation state. |
 
-**Failure protection guarantee:** Failed, rate-limited, interrupted, CAPTCHA-blocked, or zero-result sweeps (`outcome: "failed"` or `"success_zero_results"`) **never** mark active listings as `inactive` or `removed`.
+**Failure protection guarantee:** Failed, rate-limited, interrupted, CAPTCHA-blocked, or zero-result sweeps (`outcome: "failed"` or `"success_zero_results"`) **never** create, update, reactivate, mark `inactive`, or mark `removed` any listing records or emit change events.
 
 ### 4.3 Missing vs. Empty Distinction
 - `null`: Element or metadata field was absent or unavailable in the scraped HTML/JSON-LD (e.g., `description: null` on a summary card, or `contact.phone: null` when click-protected).
@@ -68,9 +68,9 @@ Scrrprr resolves the expected secret from `process.env.BURSA_API_KEY`, falling b
 
 ## 5. Endpoints
 
-### 5.1 `GET /api/v1/bursa/listings`
+### 5.1 `GET /api/v1/bursa/listings` (alias: `GET /api/v1/bursa/ads`)
 
-Returns paginated Bursa listings ordered by `last_updated_at DESC, first_seen_at DESC, id ASC`, each embedding its append-only change history (`changes` sorted `detected_at DESC`).
+Returns paginated Bursa listings ordered by `last_updated_at DESC, first_seen_at DESC, id ASC`, each embedding its append-only change history (`changes` sorted `detected_at DESC`). Also accessible via `/api/bursa/*` with identical authentication and schema.
 
 #### Query Parameters
 | Parameter | Type | Required | Default | Constraints / Description |
