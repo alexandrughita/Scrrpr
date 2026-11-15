@@ -137,6 +137,31 @@ export function createBursaV1Router(options: BursaRouterOptions): express.Router
     next();
   });
 
+  // POST /api/v1/bursa/scrape — start an authenticated discovery sweep on demand.
+  // The sweep is awaited so callers know when the store is ready to be queried.
+  router.post("/scrape", async (_req, res) => {
+    try {
+      const result = await options.scraper.runDiscoverySweep();
+      if (!result.started) {
+        return res.status(409).json({
+          source: BURSA_SOURCE_NAME,
+          schema_version: BURSA_SCHEMA_VERSION,
+          generated_at: new Date().toISOString(),
+          error: { code: "RUN_IN_PROGRESS", message: "A Bursa discovery sweep is already running" },
+        });
+      }
+      return res.json({
+        source: BURSA_SOURCE_NAME,
+        schema_version: BURSA_SCHEMA_VERSION,
+        generated_at: new Date().toISOString(),
+        run: result.run,
+        health: options.scraper.getHealth(),
+      });
+    } catch (err) {
+      return res.status(500).json(makeErrorEnvelope("INTERNAL_ERROR", sanitizeErrorMessage(err)));
+    }
+  });
+
   // GET /api/v1/bursa/listings (and /ads alias)
   router.get(["/listings", "/ads"], (req, res) => {
     try {
